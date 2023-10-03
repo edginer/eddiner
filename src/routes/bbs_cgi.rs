@@ -148,12 +148,12 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             return Response::error("Bad request", 400);
         }
 
-        let token_cookie_candidate = match (self.token_cookie.as_deref(), self.form.cap.as_deref())
+        let (token_cookie_candidate, is_cap) = match (self.token_cookie.as_deref(), self.form.cap.as_deref())
         {
-            (Some(cookie), Some(_)) => Some(cookie),
-            (Some(cookie), None) => Some(cookie),
-            (None, Some(cap)) => Some(cap),
-            (None, None) => None,
+            (Some(_), Some(cap)) => (Some(cap), true),
+            (Some(cookie), None) => (Some(cookie), false),
+            (None, Some(cap)) => (Some(cap), true),
+            (None, None) => (None, false),
         };
 
         let authenticated_user_cookie = if let Some(tk) = token_cookie_candidate {
@@ -206,7 +206,7 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
                 x.headers_mut()
                     .append(
                         "Set-Cookie",
-                        &format!("edge-token={}; Max-Age=31536000; Path=/", token),
+                        &format!("edge-token={token}; Max-Age=31536000; Path=/"),
                     )
                     .unwrap();
                 x
@@ -216,7 +216,7 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
         }
 
         let mut hasher = Md5::new();
-        hasher.update(&authenticated_user_cookie.unwrap().cookie);
+        hasher.update(&authenticated_user_cookie.clone().unwrap().cookie);
         let datetime = get_current_date_time();
         hasher.update(datetime.date().to_string());
         let hash = hasher.finalize();
@@ -224,10 +224,23 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
 
         self.id = Some(id);
 
-        if self.form.is_thread {
+        let result = if self.form.is_thread {
             self.create_thread().await
         } else {
             self.create_response().await
+        };
+
+        if is_cap {
+            let tk = authenticated_user_cookie.unwrap().cookie;
+            result.map(|mut x| {
+                x.headers_mut()
+                    .append("Set-Cookie", 
+                            &format!("edge-token={}; Max-Age=31536000; Path=/", tk)
+                    ).unwrap();
+                x
+            })
+        } else {
+            result
         }
     }
 
