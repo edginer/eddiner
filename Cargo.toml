@@ -1,0 +1,26 @@
+[package]
+name = "worker-rust"
+version = "0.1.0"
+edition = "2021"
+
+# https://github.com/rustwasm/wasm-pack/issues/1247
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+chrono = { version = "0.4.31", features = ["serde"] }
+cookie = "0.17.0"
+encoding_rs = "0.8.33"
+md-5 = "0.10.6"
+reqwest = { version = "0.11.20", features = ["multipart"] }
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.107"
+worker = { version = "0.0.18", features = ["d1"] }
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

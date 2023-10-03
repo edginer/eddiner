@@ -1,0 +1,18 @@
+name = "edge"
+main = "build/worker/shim.mjs"
+compatibility_date = "2023-03-22"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[d1_databases]]
+binding = "DB" # i.e. available in your Worker on env.DB
+database_name = "zerochedge-d1"
+database_id = "<fill-your-d1-database-id>"
+
+[vars]
+SITE_KEY = "<fill-your-turnstili-site-key>"
+SECRET_KEY = "<fill-your-turnstili-secret-key>"
+
+[triggers]
+crons = ["*/15 * * * *"]
