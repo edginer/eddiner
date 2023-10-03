@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chrono::NaiveDateTime;
 use worker::{Date, Response};
 
 pub fn shift_jis_url_encodeded_body_to_vec(
@@ -85,6 +86,17 @@ pub fn response_shift_jis_text_html(body: String) -> worker::Result<Response> {
         .headers_mut()
         .append("Content-Type", "text/html; charset=x-sjis");
     Ok(resp)
+}
+
+pub fn get_current_date_time() -> chrono::NaiveDateTime {
+    let date = NaiveDateTime::from_timestamp_millis(Date::now().as_millis() as i64).unwrap();
+    date.checked_add_signed(chrono::Duration::hours(9)).unwrap()
+}
+
+pub fn get_current_date_time_string() -> String {
+    get_current_date_time()
+        .format("%Y/%m/%d(%a) %H:%M:%S.%3f")
+        .to_string()
 }
 
 #[cfg(test)]

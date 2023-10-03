@@ -4,7 +4,10 @@ use worker::*;
 use crate::{
     authed_cookie::AuthedCookie,
     thread::Thread,
-    utils::{self, get_unix_timetamp_sec, response_shift_jis_text_html},
+    utils::{
+        self, get_current_date_time, get_current_date_time_string, get_unix_timetamp_sec,
+        response_shift_jis_text_html,
+    },
 };
 
 const WRITING_SUCCESS_HTML_RESPONSE: &str =
@@ -106,7 +109,7 @@ struct BbsCgiRouter<'a, 'b> {
     ip_addr: String,
     form: BbsCgiForm,
     unix_time: u64,
-    id: String,
+    id: Option<String>,
 }
 
 impl<'a, 'b> BbsCgiRouter<'a, 'b> {
@@ -130,23 +133,17 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             None => return Err(Response::error("Bad request", 400)),
         };
 
-        let mut hasher = Md5::new();
-        hasher.update(&ip_addr);
-        // hasher.update(&unix_time.to_string());
-        let hash = hasher.finalize();
-        let id = format!("{:x}", hash).chars().take(10).collect::<String>();
-
         Ok(Self {
             db,
             token_cookie,
             ip_addr,
             form,
             unix_time: get_unix_timetamp_sec(),
-            id,
+            id: None,
         })
     }
 
-    async fn route(self) -> Result<Response> {
+    async fn route(mut self) -> Result<Response> {
         if self.form.board_key != "liveedge" {
             return Response::error("Bad request", 400);
         }
@@ -218,6 +215,15 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             return resp;
         }
 
+        let mut hasher = Md5::new();
+        hasher.update(&authenticated_user_cookie.unwrap().cookie);
+        let datetime = get_current_date_time();
+        hasher.update(datetime.date().to_string());
+        let hash = hasher.finalize();
+        let id = format!("{:x}", hash).chars().take(10).collect::<String>();
+
+        self.id = Some(id);
+
         if self.form.is_thread {
             self.create_thread().await
         } else {
@@ -240,7 +246,14 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
 
         let response = self.db.prepare(
             "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ).bind(&[name.into(), mail.into(), Date::now().to_string().into(), self.id.into(), body.into(), self.unix_time.to_string().into(), self.ip_addr.into()]);
+        ).bind(&[name.into(), 
+            mail.into(),
+            get_current_date_time_string().into(), 
+            self.id.unwrap().into(), 
+            body.into(), 
+            self.unix_time.to_string().into(), 
+            self.ip_addr.into(),
+        ]);
 
         match (thread, response) {
             (Ok(thread), Ok(response)) => {
@@ -312,8 +325,8 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
         ).bind(&[
             name.into(),
             mail.into(),
-            Date::now().to_string().into(),
-            self.id.into(),
+            get_current_date_time_string().into(),
+            self.id.unwrap().into(),
             body.into(),
             thread_id.into(),
             self.ip_addr.into()
