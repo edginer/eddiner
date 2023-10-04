@@ -51,7 +51,10 @@ pub fn shift_jis_url_encodeded_body_to_vec(
                         result.push(code);
                     }
                     i += 2;
-                } else {
+                } else if item == 0x2b {
+                    result.push(0x20);
+                } 
+                else {
                     result.push(bytes[i]);
                 }
                 i += 1;
