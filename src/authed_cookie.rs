@@ -7,4 +7,6 @@ pub struct AuthedCookie {
     pub authed_time: Option<String>,
     pub origin_ip: String,
     pub authed: i32,
+    pub writed_time: String,
+    pub auth_code: String,
 }

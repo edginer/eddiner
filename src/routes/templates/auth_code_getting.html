@@ -1,0 +1,17 @@
+<html>
+
+<head>
+    <title>コード認証画面</title>
+    <meta charset="utf-8">
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+<body>
+    <p>認証を進めるために、事前に書き込みを行い6桁の認証コードを取得してください</p>
+    <form action="/auth-code" method="POST">
+        <div class="cf-turnstile" data-sitekey="{site_key}" data-theme="light"></div>
+        <input type="number" name="auth-code" placeholder="6桁の認証コード">
+        <input type="submit" value="Submit">
+    </form>
+</body>
+
+</html>

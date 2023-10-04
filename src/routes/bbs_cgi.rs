@@ -6,7 +6,7 @@ use crate::{
     thread::Thread,
     utils::{
         self, get_current_date_time, get_current_date_time_string, get_unix_timetamp_sec,
-        response_shift_jis_text_html,
+        response_shift_jis_text_html, generate_six_digit_num,
     },
 };
 
@@ -15,6 +15,8 @@ const WRITING_SUCCESS_HTML_RESPONSE: &str =
 const WRITING_FAILED_HTML_RESPONSE: &str =
     include_str!("templates/writing_failed_html_response.html");
 const REQUEST_AUTHENTICATION_HTML: &str = include_str!("templates/request_authentication.html");
+const REQUEST_AUTHENTICATION_CODE_HTML: &str =
+    include_str!("templates/request_authentication_code.html");
 
 #[derive(Debug, Clone)]
 struct BbsCgiForm {
@@ -96,10 +98,13 @@ pub async fn route_bbs_cgi(
     db: &D1Database,
     token_cookie: &Option<String>,
 ) -> Result<Response> {
-    let router = match BbsCgiRouter::new(req, db, token_cookie).await {
+    let ua = req.headers().get("User-Agent").ok().flatten();
+    
+    let router = match BbsCgiRouter::new(req, db, token_cookie, ua).await {
         Ok(router) => router,
         Err(resp) => return resp,
     };
+    
     router.route().await
 }
 
@@ -110,6 +115,7 @@ struct BbsCgiRouter<'a, 'b> {
     form: BbsCgiForm,
     unix_time: u64,
     id: Option<String>,
+    ua: Option<String>,
 }
 
 impl<'a, 'b> BbsCgiRouter<'a, 'b> {
@@ -117,6 +123,7 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
         req: &'a mut Request,
         db: &'a D1Database,
         token_cookie: &'b Option<String>,
+        ua: Option<String>,
     ) -> std::result::Result<Self, Result<Response>> {
         let Ok(Some(ip_addr)) = req.headers().get("CF-Connecting-IP") else {
             return Err(Response::error(
@@ -140,6 +147,7 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             form,
             unix_time: get_unix_timetamp_sec(),
             id: None,
+            ua,
         })
     }
 
@@ -184,14 +192,18 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             hasher.update(&self.unix_time.to_string());
             let hash = hasher.finalize();
             let token = format!("{:x}", hash);
+            let auth_code = generate_six_digit_num();
+            let writed_time = get_unix_timetamp_sec().to_string();
 
             let Ok(stmt) = self
                 .db
-                .prepare("INSERT INTO authed_cookies (cookie, origin_ip, authed) VALUES (?, ?, ?)")
+                .prepare("INSERT INTO authed_cookies (cookie, origin_ip, authed, auth_code, writed_time) VALUES (?, ?, ?, ?, ?)")
                 .bind(&[
                     token.to_string().into(),
                     self.ip_addr.to_string().into(),
                     0.into(),
+                    auth_code.clone().into(),
+                    writed_time.into(),
                 ])
             else {
                 return Response::error("internal server error - auth bind", 500);
@@ -201,7 +213,14 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
                 return Response::error("internal server error - db", 500);
             }
 
-            let auth_body = REQUEST_AUTHENTICATION_HTML.replace("{token}", &token);
+            let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false) ;
+
+            let auth_body = if is_mate {
+                REQUEST_AUTHENTICATION_HTML.replace("{token}", &token)
+            } else {
+                REQUEST_AUTHENTICATION_CODE_HTML.replace("{token}", &token).replace("{auth_code}", &auth_code)
+            };
+            
             let resp = response_shift_jis_text_html(auth_body.clone()).map(|mut x| {
                 x.headers_mut()
                     .append(

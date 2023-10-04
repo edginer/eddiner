@@ -1,6 +1,7 @@
 use cookie::Cookie;
 use routes::{
     auth::{route_auth_get, route_auth_post},
+    auth_code::{route_auth_code_get, route_auth_code_post},
     bbs_cgi::route_bbs_cgi,
     dat_routing::route_dat,
     liveedge::route_liveedge,
@@ -15,6 +16,7 @@ mod thread;
 mod utils;
 pub(crate) mod routes {
     pub(crate) mod auth;
+    pub(crate) mod auth_code;
     pub(crate) mod bbs_cgi;
     pub(crate) mod dat_routing;
     pub(crate) mod liveedge;
@@ -74,6 +76,18 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 route_auth_post(&mut req, &db, &secret_key).await
             } else if req.method() == Method::Get {
                 route_auth_get(&req, &site_key)
+            } else {
+                Response::error("Bad request", 400)
+            }
+        }
+        "/auth-code/" | "/auth-code" => {
+            if req.method() == Method::Post {
+                let Ok(db) = env.d1("DB") else {
+                    return Response::error("internal server error: DB", 500);
+                };
+                route_auth_code_post(&mut req, &db, &secret_key).await
+            } else if req.method() == Method::Get {
+                route_auth_code_get(&site_key)
             } else {
                 Response::error("Bad request", 400)
             }

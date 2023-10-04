@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
+use rand::Rng;
 use worker::{Date, Response};
 
 pub fn shift_jis_url_encodeded_body_to_vec(
@@ -53,8 +54,7 @@ pub fn shift_jis_url_encodeded_body_to_vec(
                     i += 2;
                 } else if item == 0x2b {
                     result.push(0x20);
-                } 
-                else {
+                } else {
                     result.push(bytes[i]);
                 }
                 i += 1;
@@ -100,6 +100,24 @@ pub fn get_current_date_time_string() -> String {
     get_current_date_time()
         .format("%Y/%m/%d(%a) %H:%M:%S.%3f")
         .to_string()
+}
+
+fn unix_ts_to_bytes(ts: u64) -> [u8; 32] {
+    let mut bytes = [0; 32];
+
+    for (i, byte) in bytes.iter_mut().enumerate().take(8) {
+        *byte = (ts >> (56 - i * 8)) as u8;
+    }
+
+    bytes
+}
+
+pub fn generate_six_digit_num() -> String {
+    let milli = Date::now().as_millis();
+
+    let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(unix_ts_to_bytes(milli));
+    let num = rng.gen_range(0..1000000);
+    format!("{:06}", num)
 }
 
 #[cfg(test)]
