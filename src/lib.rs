@@ -4,6 +4,7 @@ use routes::{
     auth_code::{route_auth_code_get, route_auth_code_post},
     bbs_cgi::route_bbs_cgi,
     dat_routing::route_dat,
+    head_txt::route_head_txt,
     liveedge::route_liveedge,
     subject_txt::route_subject_txt,
 };
@@ -19,6 +20,7 @@ pub(crate) mod routes {
     pub(crate) mod auth_code;
     pub(crate) mod bbs_cgi;
     pub(crate) mod dat_routing;
+    pub(crate) mod head_txt;
     pub(crate) mod liveedge;
     pub(crate) mod setting_txt;
     pub(crate) mod subject_txt;
@@ -100,6 +102,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             };
             route_subject_txt(&db).await
         }
+        "/liveedge/head.txt" => route_head_txt(),
         "/test/bbs.cgi" => {
             if req.method() != Method::Post {
                 return Response::error("Bad request", 400);
