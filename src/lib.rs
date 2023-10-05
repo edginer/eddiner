@@ -28,37 +28,22 @@ pub(crate) mod routes {
 mod turnstile;
 
 fn get_secrets(env: &Env) -> Option<(String, String)> {
-    let Ok(site_key) = env.var("SITE_KEY") else {
-        return None;
-    };
-    let site_key = site_key.to_string();
-    let Ok(secret_key) = env.var("SECRET_KEY") else {
-        return None;
-    };
-    let secret_key = secret_key.to_string();
+    let site_key = env.var("SITE_KEY").ok()?.to_string();
+    let secret_key = env.var("SECRET_KEY").ok()?.to_string();
     Some((site_key, secret_key))
 }
 
+/// Find `edge-token` in cookies
 fn get_token_cookies(req: &Request) -> Option<String> {
-    let Ok(cookie) = req.headers().get("Cookie") else {
-        return None;
-    };
-
-    let cookie = cookie.map(|x| Cookie::split_parse(x.to_string()));
-    let token_cookie = cookie.map(|x| {
-        x.filter_map(|x| {
-            if let Ok(x) = x {
-                if x.name() != "edge-token" {
-                    return None;
-                }
-                Some((x.name().to_string(), x.value().to_string()))
-            } else {
-                None
+    let cookie_str = req.headers().get("Cookie").ok()??;
+    for cookie_item in Cookie::split_parse(cookie_str) {
+        if let Ok(cookie) = cookie_item {
+            if cookie.name() == "edge-token" {
+                return Some(cookie.value().to_string());
             }
-        })
-        .collect::<Vec<_>>()
-    });
-    token_cookie.and_then(|x| x.get(0).cloned()).map(|x| x.1)
+        }
+    }
+    None
 }
 
 #[event(fetch)]
@@ -69,7 +54,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     let token_cookie = get_token_cookies(&req);
 
-    match &req.path() as &str {
+    match &*req.path() {
         "/auth/" | "/auth" => {
             if req.method() == Method::Post {
                 let Ok(db) = env.d1("DB") else {
