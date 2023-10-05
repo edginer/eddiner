@@ -33,13 +33,12 @@ fn get_secrets(env: &Env) -> Option<(String, String)> {
     Some((site_key, secret_key))
 }
 
+/// Find `edge-token` in cookies
 fn get_token_cookies(req: &Request) -> Option<String> {
     let cookie_str = req.headers().get("Cookie").ok()??;
     for cookie_item in Cookie::split_parse(cookie_str) {
         if let Ok(cookie) = cookie_item {
-            if cookie.name() != "edge-token" {
-                return None;
-            } else {
+            if cookie.name() == "edge-token" {
                 return Some(cookie.value().to_string());
             }
         }
