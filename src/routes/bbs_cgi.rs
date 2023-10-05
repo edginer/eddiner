@@ -31,11 +31,7 @@ struct BbsCgiForm {
 }
 
 fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
-    let data = encoding_rs::SHIFT_JIS
-        .decode(&bytes)
-        .0
-        .into_owned()
-        .to_string();
+    let data = encoding_rs::SHIFT_JIS.decode(&bytes).0.to_string();
 
     // TODO: replace ApplicationError such as malformed form
     let Ok(result) = utils::shift_jis_url_encodeded_body_to_vec(&data) else {
@@ -51,18 +47,12 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
         }
     };
 
-    let mail = result["mail"].split('#').collect::<Vec<_>>();
-
-    let (mail, cap) = if mail.len() == 1 {
-        (mail[0], None)
+    let mail_segments = result["mail"].split('#').collect::<Vec<_>>();
+    let mail = mail_segments[0];
+    let cap = if mail.len() == 1 {
+        None
     } else {
-        (
-            mail[0],
-            Some(mail.iter().skip(1).fold(String::new(), |mut cur, next| {
-                cur.push_str(next);
-                cur
-            })),
-        )
+        Some(mail_segments[1..].concat())
     };
 
     let subject = if is_thread {
@@ -123,7 +113,7 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
         db: &'a D1Database,
         token_cookie: &'b Option<String>,
         ua: Option<String>,
-    ) -> std::result::Result<Self, Result<Response>> {
+    ) -> std::result::Result<BbsCgiRouter<'a, 'b>, Result<Response>> {
         let Ok(Some(ip_addr)) = req.headers().get("CF-Connecting-IP") else {
             return Err(Response::error(
                 "internal server error - cf-connecting-ip",
