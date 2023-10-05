@@ -90,11 +90,9 @@ pub async fn route_auth_post(
 }
 
 pub fn route_auth_get(req: &Request, site_key: &str) -> Result<Response> {
-    let url = req.url().unwrap();
-    let Some(token) = url.query().map(|e| e.split('=').collect::<Vec<&str>>()) else {
-        return Response::error("Bad request", 400);
-    };
-    let Some(token) = token.get(1) else {
+    let url = req.url()?;
+    // get y in x=y
+    let Some(Some(token)) = url.query().map(|e| e.split('=').nth(1)) else {
         return Response::error("Bad request", 400);
     };
 
