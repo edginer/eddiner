@@ -53,6 +53,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     };
 
     let token_cookie = get_token_cookies(&req);
+    let ua = req.headers().get("User-Agent").ok().flatten();
 
     match &*req.path() {
         "/auth/" | "/auth" => {
@@ -97,13 +98,17 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Response::error("internal server error - db", 500);
             };
 
-            route_bbs_cgi(&mut req, &db, &token_cookie).await
+            route_bbs_cgi(&mut req, ua, &db, &token_cookie).await
         }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
-            route_dat(e, &db).await
+
+            let range = req.headers().get("Range").ok().flatten();
+            let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
+
+            route_dat(e, ua, range, if_modified_since, &db).await
         }
         _ => Response::error(format!("Not found - other route {}", req.path()), 404),
     }

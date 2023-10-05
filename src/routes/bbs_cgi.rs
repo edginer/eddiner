@@ -5,8 +5,8 @@ use crate::{
     authed_cookie::AuthedCookie,
     thread::Thread,
     utils::{
-        self, get_current_date_time, get_current_date_time_string, get_unix_timetamp_sec,
-        response_shift_jis_text_html, generate_six_digit_num,
+        self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
+        get_unix_timetamp_sec, response_shift_jis_text_html,
     },
 };
 
@@ -95,16 +95,15 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
 
 pub async fn route_bbs_cgi(
     req: &mut Request,
+    ua: Option<String>,
     db: &D1Database,
     token_cookie: &Option<String>,
 ) -> Result<Response> {
-    let ua = req.headers().get("User-Agent").ok().flatten();
-    
     let router = match BbsCgiRouter::new(req, db, token_cookie, ua).await {
         Ok(router) => router,
         Err(resp) => return resp,
     };
-    
+
     router.route().await
 }
 
@@ -213,14 +212,16 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
                 return Response::error("internal server error - db", 500);
             }
 
-            let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false) ;
+            let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false);
 
             let auth_body = if is_mate {
                 REQUEST_AUTHENTICATION_HTML.replace("{token}", &token)
             } else {
-                REQUEST_AUTHENTICATION_CODE_HTML.replace("{token}", &token).replace("{auth_code}", &auth_code)
+                REQUEST_AUTHENTICATION_CODE_HTML
+                    .replace("{token}", &token)
+                    .replace("{auth_code}", &auth_code)
             };
-            
+
             let resp = response_shift_jis_text_html(auth_body.clone()).map(|mut x| {
                 x.headers_mut()
                     .append(
