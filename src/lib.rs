@@ -54,7 +54,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     let token_cookie = get_token_cookies(&req);
 
-    match &req.path() as &str {
+    match &*req.path() {
         "/auth/" | "/auth" => {
             if req.method() == Method::Post {
                 let Ok(db) = env.d1("DB") else {
