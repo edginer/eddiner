@@ -6,7 +6,13 @@ use crate::{
     utils::response_shift_jis_text_plain,
 };
 
-pub async fn route_dat(path: &str, db: &D1Database) -> Result<Response> {
+pub async fn route_dat(
+    path: &str,
+    ua: Option<String>,
+    range: Option<String>,
+    _if_modified_since: Option<String>,
+    db: &D1Database,
+) -> Result<Response> {
     let thread_id = path.replace(".dat", "").replace("/liveedge/dat/", "");
     let Ok(thread_id) = thread_id.parse::<u64>() else {
         return Response::error("Bad request", 400);
@@ -40,5 +46,11 @@ pub async fn route_dat(path: &str, db: &D1Database) -> Result<Response> {
     };
 
     let body = responses.format_responses(&thread.title);
-    response_shift_jis_text_plain(body)
+    response_shift_jis_text_plain(body).map(|x| {
+        if matches!((ua, range), (Some(ua), Some(_)) if ua.contains("twinkle")) {
+            x.with_status(416)
+        } else {
+            x
+        }
+    })
 }
