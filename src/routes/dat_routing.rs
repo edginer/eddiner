@@ -31,10 +31,7 @@ pub async fn route_dat(
     let Some(thread) = thread else {
         return Response::error("Not found - dat", 404);
     };
-    log::debug!("range: {:?}", range);
     if let Some(if_modified_since) = if_modified_since {
-        log::debug!("if_modified_since: {}", if_modified_since);
-
         if let Ok(parsed_date_time) =
             chrono::NaiveDateTime::parse_from_str(&if_modified_since, "%Y/%m/%d %H:%M:%S")
         {

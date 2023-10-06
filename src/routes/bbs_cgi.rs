@@ -145,13 +145,12 @@ impl<'a> BbsCgiRouter<'a> {
             return Response::error("Bad request", 400);
         }
 
-        let (token_cookie_candidate, is_cap) =
-            match (self.token_cookie.as_deref(), self.form.cap.as_deref()) {
-                (Some(_), Some(cap)) => (Some(cap), true),
-                (Some(cookie), None) => (Some(cookie), false),
-                (None, Some(cap)) => (Some(cap), true),
-                (None, None) => (None, false),
-            };
+        let (token_cookie_candidate, is_cap) = match (self.token_cookie, self.form.cap.as_deref()) {
+            (Some(_), Some(cap)) => (Some(cap), true),
+            (Some(cookie), None) => (Some(cookie), false),
+            (None, Some(cap)) => (Some(cap), true),
+            (None, None) => (None, false),
+        };
 
         let authenticated_user_cookie = if let Some(tk) = token_cookie_candidate {
             let Ok(stmt) = self

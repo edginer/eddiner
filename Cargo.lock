@@ -1545,7 +1545,6 @@ dependencies = [
  "chrono",
  "cookie",
  "encoding_rs",
- "log",
  "md-5",
  "rand",
  "reqwest",
