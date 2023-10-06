@@ -52,17 +52,17 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     let cap = if mail_segments.len() == 1 {
         None
     } else {
-        Some(mail_segments[1..].concat())
+        Some(sanitize(&mail_segments[1..].concat()))
     };
 
     let subject = if is_thread {
-        Some(result["subject"].clone())
+        Some(sanitize(&result["subject"]).clone())
     } else {
         None
     };
-    let name = result["FROM"].clone();
-    let mail = mail.to_string();
-    let body = result["MESSAGE"].clone();
+    let name = sanitize(&result["FROM"]).clone();
+    let mail = sanitize(mail).to_string();
+    let body = sanitize(&result["MESSAGE"]).clone();
     let board_key = result["bbs"].clone();
 
     let thread_id = if is_thread {
@@ -145,13 +145,12 @@ impl<'a> BbsCgiRouter<'a> {
             return Response::error("Bad request", 400);
         }
 
-        let (token_cookie_candidate, is_cap) =
-            match (self.token_cookie.as_deref(), self.form.cap.as_deref()) {
-                (Some(_), Some(cap)) => (Some(cap), true),
-                (Some(cookie), None) => (Some(cookie), false),
-                (None, Some(cap)) => (Some(cap), true),
-                (None, None) => (None, false),
-            };
+        let (token_cookie_candidate, is_cap) = match (self.token_cookie, self.form.cap.as_deref()) {
+            (Some(_), Some(cap)) => (Some(cap), true),
+            (Some(cookie), None) => (Some(cookie), false),
+            (None, Some(cap)) => (Some(cap), true),
+            (None, None) => (None, false),
+        };
 
         let authenticated_user_cookie = if let Some(tk) = token_cookie_candidate {
             let Ok(stmt) = self
@@ -371,4 +370,14 @@ impl<'a> BbsCgiRouter<'a> {
             _ => Response::error("internal server error - resp prep", 500),
         }
     }
+}
+
+fn sanitize(input: &str) -> String {
+    input
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\n', "<br>")
+        .replace('\r', "")
+        .replace("&#10;", "")
 }
