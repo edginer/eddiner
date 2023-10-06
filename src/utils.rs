@@ -9,18 +9,15 @@ pub fn shift_jis_url_encodeded_body_to_vec(
 ) -> std::result::Result<HashMap<&str, String>, ()> {
     fn ascii_hex_digit_to_byte(value: u8) -> Result<u8, ()> {
         if value.is_ascii_hexdigit() {
-            if !value.is_ascii_alphabetic() || value.is_ascii_uppercase() {
-                if value.is_ascii_digit() {
-                    Ok(value - 0x30)
-                } else {
-                    Ok(value - 0x41 + 0xa)
-                }
-            } else if !value.is_ascii_alphabetic() || value.is_ascii_lowercase() {
-                if value.is_ascii_digit() {
-                    Ok(value - 0x30)
-                } else {
-                    Ok(value - 0x61 + 0xa)
-                }
+            if value.is_ascii_digit() {
+                // U+0030 '0' - U+0039 '9',
+                Ok(value - 0x30)
+            } else if value.is_ascii_uppercase() {
+                // U+0041 'A' - U+0046 'F',
+                Ok(value - 0x41 + 0xa)
+            } else if value.is_ascii_lowercase() {
+                // U+0061 'a' - U+0066 'f',
+                Ok(value - 0x61 + 0xa)
             } else {
                 Err(())
             }
@@ -43,10 +40,9 @@ pub fn shift_jis_url_encodeded_body_to_vec(
             while i < len {
                 let item = bytes[i];
                 if item == 0x25 {
-                    let next = bytes.get(i + 1);
-                    let next2 = bytes.get(i + 2);
-                    if let (Some(next), Some(next2)) = (next, next2) {
-                        let first_byte = ascii_hex_digit_to_byte(*next)?;
+                    // Look up the next two bytes from 0x25
+                    if let Some([next1, next2]) = bytes.get(i + 1..i + 3) {
+                        let first_byte = ascii_hex_digit_to_byte(*next1)?;
                         let second_byte = ascii_hex_digit_to_byte(*next2)?;
                         let code = first_byte * 0x10_u8 + second_byte;
                         result.push(code);

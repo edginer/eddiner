@@ -96,7 +96,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Response::error("internal server error - db", 500);
             };
 
-            route_bbs_cgi(&mut req, ua, &db, &token_cookie).await
+            route_bbs_cgi(&mut req, ua, &db, token_cookie.as_deref()).await
         }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
             let Ok(db) = env.d1("DB") else {
