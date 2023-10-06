@@ -22,7 +22,7 @@ impl Ch5ThreadFormatter for Vec<Thread> {
         for t in self {
             builder.push_str(&t.thread_number.to_string());
             builder.push_str(".dat<>");
-            builder.push_str(&t.title);
+            builder.push_str(&t.title.replace('\n', ""));
             builder.push_str(" (");
             builder.push_str(&t.response_count.to_string());
             builder.push_str(")\n");

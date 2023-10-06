@@ -58,21 +58,24 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     } else {
         (
             mail[0],
-            Some(mail.iter().skip(1).fold(String::new(), |mut cur, next| {
-                cur.push_str(next);
-                cur
-            })),
+            Some(sanitize(&mail.iter().skip(1).fold(
+                String::new(),
+                |mut cur, next| {
+                    cur.push_str(next);
+                    cur
+                },
+            ))),
         )
     };
 
     let subject = if is_thread {
-        Some(result["subject"].clone())
+        Some(sanitize(&result["subject"]).clone())
     } else {
         None
     };
-    let name = result["FROM"].clone();
-    let mail = mail.to_string();
-    let body = result["MESSAGE"].clone();
+    let name = sanitize(&result["FROM"]).clone();
+    let mail = sanitize(mail).to_string();
+    let body = sanitize(&result["MESSAGE"]).clone();
     let board_key = result["bbs"].clone();
 
     let thread_id = if is_thread {
@@ -381,4 +384,14 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             _ => Response::error("internal server error - resp prep", 500),
         }
     }
+}
+
+fn sanitize(input: &str) -> String {
+    input
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\n', "<br>")
+        .replace('\r', "")
+        .replace("&#10;", "")
 }

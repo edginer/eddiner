@@ -29,12 +29,17 @@ impl Ch5ResponsesFormatter for Vec<Res> {
                     } else {
                         x
                     })
-                    .unwrap_or("エッヂの名無し".to_string()),
-                r.mail.clone().unwrap_or("".to_string()),
+                    .unwrap_or("エッヂの名無し".to_string())
+                    .replace('\n', ""),
+                r.mail.clone().unwrap_or("".to_string()).replace('\n', ""),
                 r.date,
                 r.author_id.clone().unwrap_or("".to_string()),
                 r.body.replace('\n', "<br>"),
-                if idx == 0 { thread_title } else { "" }
+                if idx == 0 {
+                    thread_title.replace('\n', "")
+                } else {
+                    "".to_string()
+                }
             ));
             builder.push('\n');
         }
