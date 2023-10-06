@@ -31,11 +31,7 @@ struct BbsCgiForm {
 }
 
 fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
-    let data = encoding_rs::SHIFT_JIS
-        .decode(&bytes)
-        .0
-        .into_owned()
-        .to_string();
+    let data = encoding_rs::SHIFT_JIS.decode(&bytes).0.to_string();
 
     // TODO: replace ApplicationError such as malformed form
     let Ok(result) = utils::shift_jis_url_encodeded_body_to_vec(&data) else {
@@ -51,18 +47,12 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
         }
     };
 
-    let mail = result["mail"].split('#').collect::<Vec<_>>();
-
-    let (mail, cap) = if mail.len() == 1 {
-        (mail[0], None)
+    let mail_segments = result["mail"].split('#').collect::<Vec<_>>();
+    let mail = mail_segments[0];
+    let cap = if mail_segments.len() == 1 {
+        None
     } else {
-        (
-            mail[0],
-            Some(mail.iter().skip(1).fold(String::new(), |mut cur, next| {
-                cur.push_str(next);
-                cur
-            })),
-        )
+        Some(mail_segments[1..].concat())
     };
 
     let subject = if is_thread {
@@ -97,7 +87,7 @@ pub async fn route_bbs_cgi(
     req: &mut Request,
     ua: Option<String>,
     db: &D1Database,
-    token_cookie: &Option<String>,
+    token_cookie: Option<&str>,
 ) -> Result<Response> {
     let router = match BbsCgiRouter::new(req, db, token_cookie, ua).await {
         Ok(router) => router,
@@ -107,9 +97,9 @@ pub async fn route_bbs_cgi(
     router.route().await
 }
 
-struct BbsCgiRouter<'a, 'b> {
+struct BbsCgiRouter<'a> {
     db: &'a D1Database,
-    token_cookie: &'b Option<String>,
+    token_cookie: Option<&'a str>,
     ip_addr: String,
     form: BbsCgiForm,
     unix_time: u64,
@@ -117,13 +107,13 @@ struct BbsCgiRouter<'a, 'b> {
     ua: Option<String>,
 }
 
-impl<'a, 'b> BbsCgiRouter<'a, 'b> {
+impl<'a> BbsCgiRouter<'a> {
     async fn new(
         req: &'a mut Request,
         db: &'a D1Database,
-        token_cookie: &'b Option<String>,
+        token_cookie: Option<&'a str>,
         ua: Option<String>,
-    ) -> std::result::Result<Self, Result<Response>> {
+    ) -> std::result::Result<BbsCgiRouter<'a>, Result<Response>> {
         let Ok(Some(ip_addr)) = req.headers().get("CF-Connecting-IP") else {
             return Err(Response::error(
                 "internal server error - cf-connecting-ip",
