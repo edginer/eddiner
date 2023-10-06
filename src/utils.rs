@@ -79,6 +79,17 @@ pub fn response_shift_jis_text_plain(body: String) -> worker::Result<Response> {
     Ok(resp)
 }
 
+pub fn response_shift_jis_with_range(body: String, start_range: usize) -> worker::Result<Response> {
+    let data = encoding_rs::SHIFT_JIS.encode(&body).0.into_owned();
+    let Ok(mut resp) = Response::from_bytes(data.into_iter().skip(start_range).collect::<Vec<_>>())
+    else {
+        return Response::error("internal server error - converting sjis", 500);
+    };
+    let _ = resp.headers_mut().delete("Content-Type");
+    let _ = resp.headers_mut().append("Content-Type", "text/plain");
+    Ok(resp)
+}
+
 pub fn response_shift_jis_text_html(body: String) -> worker::Result<Response> {
     let data = encoding_rs::SHIFT_JIS.encode(&body).0.into_owned();
     let Ok(mut resp) = Response::from_bytes(data) else {

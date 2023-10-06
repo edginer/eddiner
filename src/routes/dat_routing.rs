@@ -3,14 +3,14 @@ use worker::*;
 use crate::{
     response::{Ch5ResponsesFormatter, Res},
     thread::Thread,
-    utils::response_shift_jis_text_plain,
+    utils::{response_shift_jis_text_plain, response_shift_jis_with_range},
 };
 
 pub async fn route_dat(
     path: &str,
     ua: Option<String>,
     range: Option<String>,
-    _if_modified_since: Option<String>,
+    if_modified_since: Option<String>,
     db: &D1Database,
 ) -> Result<Response> {
     let thread_id = path.replace(".dat", "").replace("/liveedge/dat/", "");
@@ -31,6 +31,20 @@ pub async fn route_dat(
     let Some(thread) = thread else {
         return Response::error("Not found - dat", 404);
     };
+    log::debug!("range: {:?}", range);
+    if let Some(if_modified_since) = if_modified_since {
+        log::debug!("if_modified_since: {}", if_modified_since);
+
+        if let Ok(parsed_date_time) =
+            chrono::NaiveDateTime::parse_from_str(&if_modified_since, "%Y/%m/%d %H:%M:%S")
+        {
+            let remote_last_modified = parsed_date_time.timestamp() - 32400; // fix local time
+
+            if remote_last_modified >= thread.last_modified.parse::<i64>().unwrap() {
+                return Response::from_bytes(Vec::new()).map(|x| x.with_status(304));
+            }
+        }
+    }
 
     let Ok(responses_binded_stmt) = db
         .prepare("SELECT * FROM responses WHERE thread_id = ?")
@@ -46,11 +60,20 @@ pub async fn route_dat(
     };
 
     let body = responses.format_responses(&thread.title);
-    response_shift_jis_text_plain(body).map(|x| {
-        if matches!((ua, range), (Some(ua), Some(_)) if ua.contains("twinkle")) {
-            x.with_status(416)
-        } else {
-            x
+
+    match (ua, range) {
+        (Some(ua), Some(range)) if ua.contains("twinkle") => {
+            if let Some(range) = range.split('=').nth(1) {
+                let range = range.split('-').collect::<Vec<_>>();
+                let Some(start) = range.first().map(|x| x.parse::<usize>().unwrap()) else {
+                    return Response::error("Bad request", 400);
+                };
+
+                response_shift_jis_with_range(body, start).map(|x| x.with_status(206))
+            } else {
+                response_shift_jis_text_plain(body)
+            }
         }
-    })
+        _ => response_shift_jis_text_plain(body),
+    }
 }

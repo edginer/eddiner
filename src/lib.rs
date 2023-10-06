@@ -46,6 +46,8 @@ fn get_token_cookies(req: &Request) -> Option<String> {
 
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    worker_logger::init_with_string("debug");
+
     let Some((site_key, secret_key)) = get_secrets(&env) else {
         return Response::error("internal server error", 500);
     };

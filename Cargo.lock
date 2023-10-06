@@ -1545,12 +1545,14 @@ dependencies = [
  "chrono",
  "cookie",
  "encoding_rs",
+ "log",
  "md-5",
  "rand",
  "reqwest",
  "serde",
  "serde_json",
  "worker",
+ "worker_logger",
 ]
 
 [[package]]
@@ -1563,4 +1565,14 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "worker_logger"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3feaee8b9d44f53f5d8100158d30b254539ad4327d545e00de7ad9a2b2f43431"
+dependencies = [
+ "log",
+ "worker",
 ]
