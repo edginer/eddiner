@@ -41,7 +41,7 @@ pub async fn route_dat(
             let remote_last_modified = parsed_date_time.timestamp() - 32400; // fix local time
 
             if remote_last_modified >= thread.last_modified.parse::<i64>().unwrap() {
-                return Response::from_bytes(Vec::new()).map(|x| x.with_status(304));
+                return Response::empty().map(|r| r.with_status(304));
             }
         }
     }
@@ -65,7 +65,7 @@ pub async fn route_dat(
         (Some(ua), Some(range)) if ua.contains("twinkle") => {
             if let Some(range) = range.split('=').nth(1) {
                 let range = range.split('-').collect::<Vec<_>>();
-                let Some(start) = range.first().map(|x| x.parse::<usize>().unwrap()) else {
+                let Some(start) = range.first().and_then(|x| x.parse::<usize>().ok()) else {
                     return Response::error("Bad request", 400);
                 };
 
