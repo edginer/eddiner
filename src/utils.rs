@@ -8,13 +8,15 @@ pub fn shift_jis_url_encodeded_body_to_vec(
     data: &str,
 ) -> std::result::Result<HashMap<&str, String>, ()> {
     fn ascii_hex_digit_to_byte(value: u8) -> Result<u8, ()> {
-        // We only convert non-alpabetic hexdigits
-        if value.is_ascii_hexdigit() && !value.is_ascii_alphabetic() {
+        if value.is_ascii_hexdigit() {
             if value.is_ascii_digit() {
+                // U+0030 '0' - U+0039 '9',
                 Ok(value - 0x30)
             } else if value.is_ascii_uppercase() {
+                // U+0041 'A' - U+0046 'F',
                 Ok(value - 0x41 + 0xa)
             } else if value.is_ascii_lowercase() {
+                // U+0061 'a' - U+0066 'f',
                 Ok(value - 0x61 + 0xa)
             } else {
                 Err(())

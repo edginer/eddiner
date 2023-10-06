@@ -49,7 +49,7 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
 
     let mail_segments = result["mail"].split('#').collect::<Vec<_>>();
     let mail = mail_segments[0];
-    let cap = if mail.len() == 1 {
+    let cap = if mail_segments.len() == 1 {
         None
     } else {
         Some(mail_segments[1..].concat())
