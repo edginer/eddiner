@@ -87,7 +87,7 @@ pub async fn route_bbs_cgi(
     req: &mut Request,
     ua: Option<String>,
     db: &D1Database,
-    token_cookie: &Option<String>,
+    token_cookie: Option<&str>,
 ) -> Result<Response> {
     let router = match BbsCgiRouter::new(req, db, token_cookie, ua).await {
         Ok(router) => router,
@@ -97,9 +97,9 @@ pub async fn route_bbs_cgi(
     router.route().await
 }
 
-struct BbsCgiRouter<'a, 'b> {
+struct BbsCgiRouter<'a> {
     db: &'a D1Database,
-    token_cookie: &'b Option<String>,
+    token_cookie: Option<&'a str>,
     ip_addr: String,
     form: BbsCgiForm,
     unix_time: u64,
@@ -107,13 +107,13 @@ struct BbsCgiRouter<'a, 'b> {
     ua: Option<String>,
 }
 
-impl<'a, 'b> BbsCgiRouter<'a, 'b> {
+impl<'a> BbsCgiRouter<'a> {
     async fn new(
         req: &'a mut Request,
         db: &'a D1Database,
-        token_cookie: &'b Option<String>,
+        token_cookie: Option<&'a str>,
         ua: Option<String>,
-    ) -> std::result::Result<BbsCgiRouter<'a, 'b>, Result<Response>> {
+    ) -> std::result::Result<BbsCgiRouter<'a>, Result<Response>> {
         let Ok(Some(ip_addr)) = req.headers().get("CF-Connecting-IP") else {
             return Err(Response::error(
                 "internal server error - cf-connecting-ip",
