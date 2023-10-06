@@ -1,4 +1,7 @@
+use base64::{engine::general_purpose, Engine};
 use md5::{Digest, Md5};
+use pwhash::unix;
+use sha1::Sha1;
 use worker::*;
 
 use crate::{
@@ -380,5 +383,41 @@ impl<'a, 'b> BbsCgiRouter<'a, 'b> {
             }
             _ => Response::error("internal server error - resp prep", 500),
         }
+    }
+}
+
+// &str is utf-8 bytes
+pub fn _calculate_trip(target: &str) -> String {
+    let bytes = encoding_rs::SHIFT_JIS.encode(target).0.into_owned();
+
+    if bytes.len() >= 12 {
+        let mut hasher = Sha1::new();
+        hasher.update(&bytes);
+
+        let calc_bytes = Vec::from(hasher.finalize().as_slice());
+        let result = &general_purpose::STANDARD.encode(calc_bytes)[0..12];
+        result.to_string().replace('+', ".")
+    } else {
+        let mut salt = Vec::from(if bytes.len() >= 3 { &bytes[1..=2] } else { &[] });
+        salt.push(0x48);
+        salt.push(0x2e);
+        let salt = salt
+            .into_iter()
+            .map(|x| {
+                if !(46..=122).contains(&x) {
+                    0x2e
+                } else if (0x3a..0x41).contains(&x) {
+                    x + 7
+                } else if (0x5b..0x61).contains(&x) {
+                    x + 6
+                } else {
+                    x
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let salt = std::str::from_utf8(&salt).unwrap();
+        let result = unix::crypt(bytes.as_slice(), salt).unwrap();
+        result[3..].to_string()
     }
 }
