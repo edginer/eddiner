@@ -2,7 +2,8 @@ use worker::*;
 
 use crate::utils::response_shift_jis_text_plain;
 
+const LIVEEDGE_HTML: &str = include_str!("templates/liveedge.html");
+
 pub fn route_liveedge() -> Result<Response> {
-    let builder = String::from("liveedge");
-    response_shift_jis_text_plain(builder)
+    response_shift_jis_text_plain(LIVEEDGE_HTML.to_string())
 }
