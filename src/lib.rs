@@ -8,7 +8,7 @@ use routes::{
     liveedge::route_liveedge,
     subject_txt::route_subject_txt,
 };
-use thread::Thread;
+
 use worker::*;
 
 mod authed_cookie;
@@ -116,38 +116,19 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let db = env.d1("DB").unwrap();
 
-    let mut current_threads = db
-        .prepare("SELECT * FROM threads WHERE board_id = 1 AND archived = 0")
-        .all()
+    db.prepare("UPDATE threads SET archived = 1 WHERE active = 0")
+        .run()
         .await
-        .unwrap()
-        .results::<Thread>()
         .unwrap();
-    if current_threads.len() > 75 {
-        current_threads.sort_by_key(|x| x.last_modified.parse::<u64>().unwrap());
-        current_threads.reverse();
-        let mut threads_to_archive = current_threads.split_off(70);
-        threads_to_archive.append(
-            &mut current_threads
-                .iter()
-                .filter(|x| x.active == 0)
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
 
-        let in_tokens = threads_to_archive
-            .iter()
-            .map(|x| format!("'{}'", x.thread_number))
-            .collect::<Vec<_>>()
-            .join(",");
-        let Ok(stmt) = db
-            .prepare(format!(
-                "UPDATE threads SET archived = 1 WHERE thread_number IN ({in_tokens})",
-            ))
-            .bind(&[in_tokens.into()])
-        else {
-            return;
-        };
-        stmt.run().await.unwrap();
-    }
+    db.prepare(
+        "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
+        SELECT thread_number 
+        FROM threads WHERE board_id = 1 AND archived = 0 
+        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 70
+    )",
+    )
+    .run()
+    .await
+    .unwrap();
 }
