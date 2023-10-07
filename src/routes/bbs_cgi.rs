@@ -63,7 +63,17 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     } else {
         None
     };
-    let name = sanitize(&result["FROM"]).clone();
+
+    let name_segments = result["FROM"].split('#').collect::<Vec<_>>();
+    let name = name_segments[0];
+    let name = if name_segments.len() == 1 {
+        sanitize(name).replace('◆', "◇").replace("&#9670;", "◇")
+    } else {
+        let trip = sanitize(&name_segments[1..].concat());
+        let trip = calculate_trip(&trip);
+        format!("{name}◆{trip}")
+    };
+
     let mail = sanitize(mail).to_string();
     let body = sanitize(&result["MESSAGE"]).clone();
     let board_key = result["bbs"].clone();
@@ -386,7 +396,7 @@ fn sanitize(input: &str) -> String {
 }
 
 // &str is utf-8 bytes
-pub fn _calculate_trip(target: &str) -> String {
+pub fn calculate_trip(target: &str) -> String {
     let bytes = encoding_rs::SHIFT_JIS.encode(target).0.into_owned();
 
     if bytes.len() >= 12 {
