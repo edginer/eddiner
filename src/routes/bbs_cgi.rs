@@ -412,21 +412,47 @@ pub fn calculate_trip(target: &str) -> String {
         salt.push(0x2e);
         let salt = salt
             .into_iter()
-            .map(|x| {
-                if !(46..=122).contains(&x) {
-                    0x2e
-                } else if (0x3a..0x41).contains(&x) {
-                    x + 7
-                } else if (0x5b..0x61).contains(&x) {
-                    x + 6
-                } else {
-                    x
-                }
+            .map(|x| match x {
+                0x3a..=0x40 => x + 7,
+                0x5b..=0x60 => x + 6,
+                46..=122 => x,
+                _ => 0x2e,
             })
             .collect::<Vec<_>>();
 
         let salt = std::str::from_utf8(&salt).unwrap();
         let result = unix::crypt(bytes.as_slice(), salt).unwrap();
         result[3..].to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_trip_over_12() {
+        let test_cases = [
+            ("aaaaaaaaaaaa", "OE/NFgqzszF0"),
+            ("babababababababababa", "39J6Edxx77KI"),
+            ("あああああああああああああああ", "3Djq3jN287f."),
+        ];
+        for (case, expected) in test_cases.iter() {
+            assert_eq!(&calculate_trip(case), expected);
+        }
+    }
+
+    #[test]
+    fn test_calculate_trip_under_12() {
+        let test_cases = [
+            ("a", "ZnBI2EKkq."),
+            ("あああ", "GJolKKvjNA"),
+            ("aaあaあ", "oR7LYZCwJk"),
+            ("6g9@Bt(6", "qCscNtsFCg"),
+        ];
+
+        for (case, expected) in test_cases.iter() {
+            assert_eq!(&calculate_trip(case), expected);
+        }
     }
 }
