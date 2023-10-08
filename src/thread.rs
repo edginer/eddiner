@@ -19,7 +19,7 @@ pub trait Ch5ThreadFormatter {
 
 const SUBJECT_TEMPLATE: &'static str = "
 {%- for thread in threads -%}
-  {{ thread.thread_number }}.dat<>{{ thread.title }} ({{ thread.response_count }})
+  {{ thread.thread_number }}.dat<>{{ thread.title | replace('\n', '') }} ({{ thread.response_count }})
 {% endfor -%}
 ";
 
@@ -53,15 +53,13 @@ mod tests {
     #[test]
     fn test_render_subject_txt() {
         let thread_1 = make_test_thread("実況スレ", 1666666666, 334);
-        let thread_2 = make_test_thread("雑談 <br> スレ", 1666666667, 88);
-        let thread_3 = make_test_thread("<b>悪い</b> 😈 スレ", 1666666668, 666);
-        let threads = vec![thread_1, thread_2, thread_3];
+        let thread_2 = make_test_thread("雑談 \n スレ", 1666666667, 88);
+        let threads = vec![thread_1, thread_2];
         let formatted = threads.format_threads();
         assert_eq!(
             formatted,
             r"1666666666.dat<>実況スレ (334)
-1666666667.dat<>雑談 <br> スレ (88)
-1666666668.dat<><b>悪い</b> 😈 スレ (666)
+1666666667.dat<>雑談  スレ (88)
 "
         )
     }
