@@ -1,4 +1,7 @@
+use base64::{engine::general_purpose, Engine};
 use md5::{Digest, Md5};
+use pwhash::unix;
+use sha1::Sha1;
 use worker::*;
 
 use crate::{
@@ -60,7 +63,17 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     } else {
         None
     };
-    let name = sanitize(&result["FROM"]).clone();
+
+    let name_segments = result["FROM"].split('#').collect::<Vec<_>>();
+    let name = name_segments[0];
+    let name = if name_segments.len() == 1 {
+        sanitize(name).replace('◆', "◇").replace("&#9670;", "◇")
+    } else {
+        let trip = sanitize(&name_segments[1..].concat());
+        let trip = calculate_trip(&trip);
+        format!("{name}◆{trip}")
+    };
+
     let mail = sanitize(mail).to_string();
     let body = sanitize(&result["MESSAGE"]).clone();
     let board_key = result["bbs"].clone();
@@ -380,4 +393,66 @@ fn sanitize(input: &str) -> String {
         .replace('\n', "<br>")
         .replace('\r', "")
         .replace("&#10;", "")
+}
+
+// &str is utf-8 bytes
+pub fn calculate_trip(target: &str) -> String {
+    let bytes = encoding_rs::SHIFT_JIS.encode(target).0.into_owned();
+
+    if bytes.len() >= 12 {
+        let mut hasher = Sha1::new();
+        hasher.update(&bytes);
+
+        let calc_bytes = Vec::from(hasher.finalize().as_slice());
+        let result = &general_purpose::STANDARD.encode(calc_bytes)[0..12];
+        result.to_string().replace('+', ".")
+    } else {
+        let mut salt = Vec::from(if bytes.len() >= 3 { &bytes[1..=2] } else { &[] });
+        salt.push(0x48);
+        salt.push(0x2e);
+        let salt = salt
+            .into_iter()
+            .map(|x| match x {
+                0x3a..=0x40 => x + 7,
+                0x5b..=0x60 => x + 6,
+                46..=122 => x,
+                _ => 0x2e,
+            })
+            .collect::<Vec<_>>();
+
+        let salt = std::str::from_utf8(&salt).unwrap();
+        let result = unix::crypt(bytes.as_slice(), salt).unwrap();
+        result[3..].to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_trip_over_12() {
+        let test_cases = [
+            ("aaaaaaaaaaaa", "OE/NFgqzszF0"),
+            ("babababababababababa", "39J6Edxx77KI"),
+            ("あああああああああああああああ", "3Djq3jN287f."),
+        ];
+        for (case, expected) in test_cases.iter() {
+            assert_eq!(&calculate_trip(case), expected);
+        }
+    }
+
+    #[test]
+    fn test_calculate_trip_under_12() {
+        let test_cases = [
+            ("a", "ZnBI2EKkq."),
+            ("あああ", "GJolKKvjNA"),
+            ("aaあaあ", "oR7LYZCwJk"),
+            ("6g9@Bt(6", "qCscNtsFCg"),
+        ];
+
+        for (case, expected) in test_cases.iter() {
+            assert_eq!(&calculate_trip(case), expected);
+        }
+    }
 }
