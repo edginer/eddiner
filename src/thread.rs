@@ -1,3 +1,4 @@
+use minijinja::{context, AutoEscape, Environment};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,18 +17,52 @@ pub trait Ch5ThreadFormatter {
     fn format_threads(&self) -> String;
 }
 
+const SUBJECT_TEMPLATE: &'static str = "
+{%- for thread in threads -%}
+  {{ thread.thread_number }}.dat<>{{ thread.title }} ({{ thread.response_count }})
+{% endfor -%}
+";
+
 impl Ch5ThreadFormatter for Vec<Thread> {
     fn format_threads(&self) -> String {
-        let mut builder = String::new();
-        for t in self {
-            builder.push_str(&t.thread_number.to_string());
-            builder.push_str(".dat<>");
-            builder.push_str(&t.title);
-            builder.push_str(" (");
-            builder.push_str(&t.response_count.to_string());
-            builder.push_str(")\n");
-        }
+        let mut env = Environment::new();
+        // TODO(kenmo-melon): Need to escape anything?
+        env.set_auto_escape_callback(|_| AutoEscape::None);
+        env.add_template("subject.txt", SUBJECT_TEMPLATE).unwrap();
+        let tmpl = env.get_template("subject.txt").unwrap();
+        tmpl.render(context!(threads => self)).unwrap()
+    }
+}
 
-        builder
+#[cfg(test)]
+mod tests {
+    use super::{Ch5ThreadFormatter, Thread};
+
+    fn make_test_thread(title: &str, number: u64, count: u32) -> Thread {
+        Thread {
+            title: title.to_owned(),
+            response_count: count,
+            thread_number: number.to_string(),
+            last_modified: format!("{}", 36000 + count),
+            board_id: 1,
+            non_auth_thread: 0,
+            archived: 0,
+            active: 1,
+        }
+    }
+    #[test]
+    fn test_render_subject_txt() {
+        let thread_1 = make_test_thread("実況スレ", 1666666666, 334);
+        let thread_2 = make_test_thread("雑談 <br> スレ", 1666666667, 88);
+        let thread_3 = make_test_thread("<b>悪い</b> 😈 スレ", 1666666668, 666);
+        let threads = vec![thread_1, thread_2, thread_3];
+        let formatted = threads.format_threads();
+        assert_eq!(
+            formatted,
+            r"1666666666.dat<>実況スレ (334)
+1666666667.dat<>雑談 <br> スレ (88)
+1666666668.dat<><b>悪い</b> 😈 スレ (666)
+"
+        )
     }
 }

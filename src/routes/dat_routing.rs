@@ -18,6 +18,8 @@ pub async fn route_dat(
         return Response::error("Bad request", 400);
     };
     let thread_id = thread_id.to_string();
+    // TODO (kenmo-melon): Get the default name from the board config
+    let default_name = "エッヂの名無し";
 
     let Ok(binded_stmt) = db
         .prepare("SELECT * FROM threads WHERE thread_number = ?")
@@ -45,7 +47,7 @@ pub async fn route_dat(
         return Response::error("internal server error", 500);
     };
 
-    let body = responses.format_responses(&thread.title);
+    let body = responses.format_responses(&thread.title, default_name);
     response_shift_jis_text_plain(body).map(|x| {
         if matches!((ua, range), (Some(ua), Some(_)) if ua.contains("twinkle")) {
             x.with_status(416)
