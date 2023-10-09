@@ -1,8 +1,6 @@
 import argparse
-import subprocess
 import json
-
-
+import subprocess
 from datetime import datetime
 
 
