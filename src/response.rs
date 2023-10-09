@@ -1,4 +1,5 @@
 use minijinja::{context, AutoEscape, Environment};
+use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,7 +20,7 @@ pub trait Ch5ResponsesFormatter {
 const DAT_TEMPLATE: &'static str = "
 {%- for res in responses -%}
   {%- if res.name is not none and res.name|length > 1 -%}
-    {{ res.name }}
+    {{ res.name | remove_token }}
   {%- else -%}
     {{ default_name }}
   {%- endif -%}
@@ -29,11 +30,34 @@ const DAT_TEMPLATE: &'static str = "
 {% endfor %}
 ";
 
+struct TokenRemover {
+    regex: Regex,
+    default: String,
+}
+
+impl TokenRemover {
+    fn new(default: &str) -> TokenRemover {
+        TokenRemover {
+            regex: Regex::new(r"[a-z0-9]{30,}?").unwrap(),
+            default: default.to_owned(),
+        }
+    }
+    fn remove(&self, name: String) -> String {
+        if name.starts_with("#") || (name.len() >= 30 && self.regex.is_match(&name)) {
+            self.default.clone()
+        } else {
+            name
+        }
+    }
+}
+
 impl Ch5ResponsesFormatter for Vec<Res> {
     fn format_responses(&self, thread_title: &str, default_name: &str) -> String {
         let mut env = Environment::new();
         // TODO(kenmo-melon): Need to escape anything?
         env.set_auto_escape_callback(|_| AutoEscape::None);
+        let token_remover = TokenRemover::new(default_name);
+        env.add_filter("remove_token", move |name| token_remover.remove(name));
         env.add_template("0000000000.dat", DAT_TEMPLATE).unwrap();
         let tmpl = env.get_template("0000000000.dat").unwrap();
         tmpl.render(context!(responses => self, thread_title, default_name))
@@ -61,13 +85,18 @@ mod tests {
         let res_1 = make_test_res(Some("コテハン"), "ええ？", 10);
         let res_2 = make_test_res(Some(""), "うん？\n。。。", 20);
         let res_3 = make_test_res(None, "そう...", 30);
-        let responses = vec![res_1, res_2, res_3];
+        let res_4 = make_test_res(Some("#abcdefg"), "認証てすと", 40);
+        // name.len() == 30
+        let res_5 = make_test_res(Some("a0b1c2d3e4f5g6h7i8j9k10l11m12n"), "認証できた？", 50);
+        let responses = vec![res_1, res_2, res_3, res_4, res_5];
         let formatted = responses.format_responses("実況スレ", "デフォルト名無し");
         assert_eq!(
             formatted,
             r"コテハン<><>2099/9/09(金) 0:0:10.00 ID:abC/DEf10<> ええ？<>実況スレ
 デフォルト名無し<><>2099/9/09(金) 0:0:20.00 ID:abC/DEf20<> うん？<br>。。。<>
 デフォルト名無し<><>2099/9/09(金) 0:0:30.00 ID:abC/DEf30<> そう...<>
+デフォルト名無し<><>2099/9/09(金) 0:0:40.00 ID:abC/DEf40<> 認証てすと<>
+デフォルト名無し<><>2099/9/09(金) 0:0:50.00 ID:abC/DEf50<> 認証できた？<>
 "
         )
     }
