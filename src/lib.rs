@@ -12,7 +12,7 @@ use routes::{
 use worker::*;
 
 mod authed_cookie;
-mod response;
+pub mod response;
 mod thread;
 mod utils;
 pub(crate) mod routes {

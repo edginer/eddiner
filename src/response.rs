@@ -23,7 +23,7 @@ const DAT_TEMPLATE: &'static str = "
   {%- else -%}
     {{ default_name }}
   {%- endif -%}
-  <> <>{{ res.date }} ID:{{ res.author_id if res.author_id is not none }} \
+  <><>{{ res.date }} ID:{{ res.author_id if res.author_id is not none }}\
   <> {{ res.body | replace('\n', '<br>') }}<>\
   {{ thread_title if loop.index == 1 }}
 {% endfor %}
@@ -65,9 +65,9 @@ mod tests {
         let formatted = responses.format_responses("実況スレ", "デフォルト名無し");
         assert_eq!(
             formatted,
-            r"コテハン<> <>2099/9/09(金) 0:0:10.00 ID:abC/DEf10 <> ええ？<>実況スレ
-デフォルト名無し<> <>2099/9/09(金) 0:0:20.00 ID:abC/DEf20 <> うん？<br>。。。<>
-デフォルト名無し<> <>2099/9/09(金) 0:0:30.00 ID:abC/DEf30 <> そう...<>
+            r"コテハン<><>2099/9/09(金) 0:0:10.00 ID:abC/DEf10<> ええ？<>実況スレ
+デフォルト名無し<><>2099/9/09(金) 0:0:20.00 ID:abC/DEf20<> うん？<br>。。。<>
+デフォルト名無し<><>2099/9/09(金) 0:0:30.00 ID:abC/DEf30<> そう...<>
 "
         )
     }

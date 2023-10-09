@@ -1,5 +1,5 @@
 [package]
-name = "worker-rust"
+name = "eddiner"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,8 @@ edition = "2021"
 wasm-opt = false
 
 [lib]
-crate-type = ["cdylib"]
+# 'lib' is required for bench, test, and child packages
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
 base64 = "0.21.4"
@@ -25,6 +26,13 @@ sha1 = { version = "0.10.6", default-features = false }
 worker = { version = "0.0.18", features = ["d1"] }
 getrandom = { version = "0.2.10", features = ["js"] }
 minijinja = "1.0.8"
+
+[dev-dependencies]
+criterion = { version = "0.5" }
+
+[[bench]]
+name = "bench_dat"
+harness = false
 
 [profile.release]
 lto = true
