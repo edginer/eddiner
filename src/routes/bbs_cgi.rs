@@ -187,7 +187,7 @@ impl<'a> BbsCgiRouter<'a> {
             None
         };
 
-        if authenticated_user_cookie.is_none() {
+        let Some(authenticated_user_cookie) = authenticated_user_cookie else {
             let mut hasher: Md5 = Md5::new();
             hasher.update(&self.ip_addr);
             hasher.update(&self.unix_time.to_string());
@@ -235,10 +235,26 @@ impl<'a> BbsCgiRouter<'a> {
             });
 
             return resp;
+        };
+
+        if let Some(s) = &authenticated_user_cookie.last_wrote_time {
+            if self.unix_time - s.parse::<u64>().unwrap() < 5 {
+                return response_shift_jis_text_html(
+                    WRITING_FAILED_HTML_RESPONSE
+                        .replace("{reason}", "5秒以内の連続投稿はできません"),
+                );
+            }
+        }
+
+        if let Err(e) = self
+            .update_last_wrote_time(&authenticated_user_cookie)
+            .await
+        {
+            return Response::error(e, 500);
         }
 
         let mut hasher = Md5::new();
-        hasher.update(&authenticated_user_cookie.clone().unwrap().cookie);
+        hasher.update(&authenticated_user_cookie.clone().cookie);
         let datetime = get_current_date_time();
         hasher.update(datetime.date().to_string());
         let hash = hasher.finalize();
@@ -253,7 +269,7 @@ impl<'a> BbsCgiRouter<'a> {
         };
 
         if is_cap {
-            let tk = authenticated_user_cookie.unwrap().cookie;
+            let tk = authenticated_user_cookie.cookie;
             result.map(|mut x| {
                 x.headers_mut()
                     .append(
@@ -266,6 +282,27 @@ impl<'a> BbsCgiRouter<'a> {
         } else {
             result
         }
+    }
+
+    async fn update_last_wrote_time(
+        &self,
+        cookie: &AuthedCookie,
+    ) -> std::result::Result<(), &'static str> {
+        let Ok(stmt) = self
+            .db
+            .prepare("UPDATE authed_cookies SET last_wrote_time = ? WHERE cookie = ?")
+            .bind(&[
+                self.unix_time.to_string().into(),
+                cookie.cookie.clone().into(),
+            ])
+        else {
+            return Err("internal server error - auth bind");
+        };
+        if stmt.run().await.is_err() {
+            return Err("internal server error - db");
+        }
+
+        Ok(())
     }
 
     async fn create_thread(self) -> Result<Response> {
