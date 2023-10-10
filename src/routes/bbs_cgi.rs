@@ -305,6 +305,24 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(())
     }
 
+    async fn get_thread(
+        &self,
+        thread_id: &str,
+    ) -> std::result::Result<Option<Thread>, &'static str> {
+        let Ok(get_thread_stmt) = self
+            .db
+            .prepare("SELECT * FROM threads WHERE thread_number = ? AND archived = 0")
+            .bind(&[thread_id.into()])
+        else {
+            return Err("Bad request - get_thread_stmt.is_err()");
+        };
+        let Ok(thread_info) = get_thread_stmt.first::<Thread>(None).await else {
+            return Err("Bad request - get_thread_stmt.first().is_err()");
+        };
+
+        Ok(thread_info)
+    }
+
     async fn create_thread(self) -> Result<Response> {
         let BbsCgiForm {
             subject,
@@ -312,7 +330,21 @@ impl<'a> BbsCgiRouter<'a> {
             mail,
             body,
             ..
-        } = self.form;
+        } = &self.form;
+
+        if subject.as_ref().unwrap().len() >= 200 {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "タイトルが長すぎます"),
+            );
+        }
+
+        let thread_of_now = self.get_thread(&self.unix_time.to_string()).await?;
+        if thread_of_now.is_some() {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE
+                    .replace("{reason}", "同じ時間に既にスレッドが立っています"),
+            );
+        }
 
         let thread = self.db.prepare(
             "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified) VALUES (?, ?, 1, 1, ?)",
@@ -348,20 +380,11 @@ impl<'a> BbsCgiRouter<'a> {
             body,
             thread_id,
             ..
-        } = self.form;
+        } = &self.form;
 
         let thread_id = thread_id.clone().unwrap();
 
-        let Ok(get_thread_stmt) = self
-            .db
-            .prepare("SELECT * FROM threads WHERE thread_number = ? AND archived = 0")
-            .bind(&[thread_id.clone().into()])
-        else {
-            return Response::error("Bad request - get_thread_stmt.is_err()", 400);
-        };
-        let Ok(thread_info) = get_thread_stmt.first::<Thread>(None).await else {
-            return Response::error("Bad request - get_thread_stmt.first().is_err()", 400);
-        };
+        let thread_info = self.get_thread(&thread_id).await?;
         if let Some(thread_info) = thread_info {
             if thread_info.active == 0 {
                 return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(

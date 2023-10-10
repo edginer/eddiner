@@ -3,7 +3,7 @@ use worker::*;
 use crate::{
     response::{Ch5ResponsesFormatter, Res},
     thread::Thread,
-    utils::{response_shift_jis_text_plain, response_shift_jis_with_range},
+    utils::{response_shift_jis_text_plain_with_cache, response_shift_jis_with_range},
 };
 
 pub async fn route_dat(
@@ -40,7 +40,12 @@ pub async fn route_dat(
             let remote_last_modified = parsed_date_time.timestamp() - 32400; // fix local time
 
             if remote_last_modified >= thread.last_modified.parse::<i64>().unwrap() {
-                return Response::empty().map(|r| r.with_status(304));
+                return Response::empty().map(|mut r| {
+                    let _ = r
+                        .headers_mut()
+                        .append("Cache-Control", "s-maxage=1, stale-while-revalidate=2");
+                    r.with_status(304)
+                });
             }
         }
     }
@@ -70,9 +75,9 @@ pub async fn route_dat(
 
                 response_shift_jis_with_range(body, start).map(|x| x.with_status(206))
             } else {
-                response_shift_jis_text_plain(body)
+                response_shift_jis_text_plain_with_cache(body)
             }
         }
-        _ => response_shift_jis_text_plain(body),
+        _ => response_shift_jis_text_plain_with_cache(body),
     }
 }
