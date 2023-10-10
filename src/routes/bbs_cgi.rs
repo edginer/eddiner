@@ -118,6 +118,7 @@ struct BbsCgiRouter<'a> {
     unix_time: u64,
     id: Option<String>,
     ua: Option<String>,
+    host_url: String,
 }
 
 impl<'a> BbsCgiRouter<'a> {
@@ -142,6 +143,13 @@ impl<'a> BbsCgiRouter<'a> {
             None => return Err(Response::error("Bad request", 400)),
         };
 
+        let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned)) else {
+            return Err(Response::error(
+                "internal server error - failed to parse url",
+                500,
+            ));
+        };
+
         Ok(Self {
             db,
             token_cookie,
@@ -150,6 +158,7 @@ impl<'a> BbsCgiRouter<'a> {
             unix_time: get_unix_timetamp_sec(),
             id: None,
             ua,
+            host_url,
         })
     }
 
@@ -217,11 +226,14 @@ impl<'a> BbsCgiRouter<'a> {
             let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false);
 
             let auth_body = if is_mate {
-                REQUEST_AUTHENTICATION_HTML.replace("{token}", &token)
+                REQUEST_AUTHENTICATION_HTML
+                    .replace("{token}", &token)
+                    .replace("{host_url}", &self.host_url)
             } else {
                 REQUEST_AUTHENTICATION_CODE_HTML
                     .replace("{token}", &token)
                     .replace("{auth_code}", &auth_code)
+                    .replace("{host_url}", &self.host_url)
             };
 
             let resp = response_shift_jis_text_html(auth_body.clone()).map(|mut x| {
