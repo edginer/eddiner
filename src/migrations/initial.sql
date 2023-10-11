@@ -4,8 +4,8 @@ DROP TABLE IF EXISTS responses;
 DROP TABLE IF EXISTS authed_cookies;
 
 CREATE TABLE threads (
-    thread_number TEXT NOT NULL, 
-    title TEXT NOT NULL, 
+    thread_number TEXT NOT NULL,
+    title TEXT NOT NULL,
     response_count INTEGER NOT NULL,
     last_modified TEXT NOT NULL,
     board_id INTEGER NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE responses (
     mail TEXT,
     date TEXT NOT NULL,
     author_id TEXT,
-    body TEXT NOT NULL, 
+    body TEXT NOT NULL,
     thread_id TEXT NOT NULL,
     ip_addr TEXT NOT NULL
 );
@@ -39,11 +39,11 @@ CREATE TABLE authed_cookies (
 );
 
 INSERT INTO boards (name) VALUES ('なんでも実況エッヂ');
-INSERT INTO threads (thread_number, title, response_count, last_modified, board_id) 
+INSERT INTO threads (thread_number, title, response_count, last_modified, board_id)
 VALUES ('1696233330', 'test', 1, '1696233330', 1);
 INSERT INTO responses (
     date,
-    body, 
+    body,
     thread_id,
     ip_addr
 ) VALUES (
@@ -51,5 +51,5 @@ INSERT INTO responses (
     'testtest',
     '1696233330',
     '127.0.0.1'
-); 
+);
 

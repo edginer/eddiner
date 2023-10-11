@@ -123,8 +123,8 @@ async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
 
     db.prepare(
         "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
-        SELECT thread_number 
-        FROM threads WHERE board_id = 1 AND archived = 0 
+        SELECT thread_number
+        FROM threads WHERE board_id = 1 AND archived = 0
         ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 70
     )",
     )
