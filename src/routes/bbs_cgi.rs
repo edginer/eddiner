@@ -368,12 +368,14 @@ impl<'a> BbsCgiRouter<'a> {
         match (thread, response) {
             (Ok(thread), Ok(response)) => {
                 if let Err(e) = thread.run().await {
-                    if e.to_string().to_lowercase().contains("unique") {
-                        return response_shift_jis_text_html(
+                    return if e.to_string().to_lowercase().contains("unique") {
+                        response_shift_jis_text_html(
                             WRITING_FAILED_HTML_RESPONSE
                                 .replace("{reason}", "同じ時間に既にスレッドが立っています"),
-                        );
-                    }
+                        )
+                    } else {
+                        Response::error("internal server error", 500)
+                    };
                 }
 
                 if response.run().await.is_err() {
