@@ -9,6 +9,7 @@
 1. wrangler.toml.sampleをwrangler.tomlに名前変更して適切な箇所を埋める
    - いずれもCloudflareのサイト上もしくはwrangler CLIで取得できます
 2. `npx wrangler d1 execute zerochedge-d1 --file=./src/schema.sql`でDB初期化
+   - 現在src/migrationsフォルダ内にある複数のフォルダのup.sqlも日付順に実行しないと動作しません
 3. `npx wrangler deploy`でデプロイ
 
 ## ライセンス
