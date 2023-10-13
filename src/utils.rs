@@ -77,9 +77,7 @@ pub fn response_shift_jis_text_plain(body: String) -> worker::Result<Response> {
 
 pub fn response_shift_jis_text_plain_with_cache(body: String) -> worker::Result<Response> {
     let mut resp = response_shift_jis_text_plain(body)?;
-    let _ = resp
-        .headers_mut()
-        .append("Cache-Control", "s-maxage=1, stale-while-revalidate=2");
+    let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
     Ok(resp)
 }
 
@@ -91,9 +89,7 @@ pub fn response_shift_jis_with_range(body: String, start_range: usize) -> worker
     };
     let _ = resp.headers_mut().delete("Content-Type");
     let _ = resp.headers_mut().append("Content-Type", "text/plain");
-    let _ = resp
-        .headers_mut()
-        .append("Cache-Control", "s-maxage=1, stale-while-revalidate=2");
+    let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
     Ok(resp)
 }
 
