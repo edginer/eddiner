@@ -106,7 +106,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let range = req.headers().get("Range").ok().flatten();
             let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
 
-            route_dat(e, ua, range, if_modified_since, &db).await
+            route_dat(e, range, if_modified_since, &db).await
         }
         _ => Response::error(format!("Not found - other route {}", req.path()), 404),
     }

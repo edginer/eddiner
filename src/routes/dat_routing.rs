@@ -3,12 +3,11 @@ use worker::*;
 use crate::{
     response::{Ch5ResponsesFormatter, Res},
     thread::Thread,
-    utils::{response_shift_jis_text_plain, response_shift_jis_with_range},
+    utils::{response_shift_jis_text_plain_with_cache, response_shift_jis_with_range},
 };
 
 pub async fn route_dat(
     path: &str,
-    ua: Option<String>,
     range: Option<String>,
     if_modified_since: Option<String>,
     db: &D1Database,
@@ -40,7 +39,10 @@ pub async fn route_dat(
             let remote_last_modified = parsed_date_time.timestamp() - 32400; // fix local time
 
             if remote_last_modified >= thread.last_modified.parse::<i64>().unwrap() {
-                return Response::empty().map(|r| r.with_status(304));
+                return Response::empty().map(|mut r| {
+                    let _ = r.headers_mut().append("Cache-Control", "s-maxage=1");
+                    r.with_status(304)
+                });
             }
         }
     }
@@ -60,8 +62,8 @@ pub async fn route_dat(
 
     let body = responses.format_responses(&thread.title, default_name);
 
-    match (ua, range) {
-        (Some(ua), Some(range)) if ua.contains("twinkle") => {
+    match range {
+        Some(range) => {
             if let Some(range) = range.split('=').nth(1) {
                 let range = range.split('-').collect::<Vec<_>>();
                 let Some(start) = range.first().and_then(|x| x.parse::<usize>().ok()) else {
@@ -70,9 +72,9 @@ pub async fn route_dat(
 
                 response_shift_jis_with_range(body, start).map(|x| x.with_status(206))
             } else {
-                response_shift_jis_text_plain(body)
+                response_shift_jis_text_plain_with_cache(body)
             }
         }
-        _ => response_shift_jis_text_plain(body),
+        None => response_shift_jis_text_plain_with_cache(body),
     }
 }

@@ -2,7 +2,7 @@ use worker::*;
 
 use crate::{
     thread::{Ch5ThreadFormatter, Thread},
-    utils::response_shift_jis_text_plain,
+    utils::response_shift_jis_text_plain_with_cache,
 };
 
 pub async fn route_subject_txt(db: &D1Database) -> Result<Response> {
@@ -22,5 +22,5 @@ pub async fn route_subject_txt(db: &D1Database) -> Result<Response> {
     threads.reverse();
 
     let threads_body = threads.format_threads();
-    response_shift_jis_text_plain(threads_body)
+    response_shift_jis_text_plain_with_cache(threads_body)
 }

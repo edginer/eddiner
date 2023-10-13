@@ -118,6 +118,7 @@ struct BbsCgiRouter<'a> {
     unix_time: u64,
     id: Option<String>,
     ua: Option<String>,
+    host_url: String,
 }
 
 impl<'a> BbsCgiRouter<'a> {
@@ -142,6 +143,13 @@ impl<'a> BbsCgiRouter<'a> {
             None => return Err(Response::error("Bad request", 400)),
         };
 
+        let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned)) else {
+            return Err(Response::error(
+                "internal server error - failed to parse url",
+                500,
+            ));
+        };
+
         Ok(Self {
             db,
             token_cookie,
@@ -150,6 +158,7 @@ impl<'a> BbsCgiRouter<'a> {
             unix_time: get_unix_timetamp_sec(),
             id: None,
             ua,
+            host_url,
         })
     }
 
@@ -217,11 +226,14 @@ impl<'a> BbsCgiRouter<'a> {
             let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false);
 
             let auth_body = if is_mate {
-                REQUEST_AUTHENTICATION_HTML.replace("{token}", &token)
+                REQUEST_AUTHENTICATION_HTML
+                    .replace("{token}", &token)
+                    .replace("{host_url}", &self.host_url)
             } else {
                 REQUEST_AUTHENTICATION_CODE_HTML
                     .replace("{token}", &token)
                     .replace("{auth_code}", &auth_code)
+                    .replace("{host_url}", &self.host_url)
             };
 
             let resp = response_shift_jis_text_html(auth_body.clone()).map(|mut x| {
@@ -305,6 +317,24 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(())
     }
 
+    async fn get_thread(
+        &self,
+        thread_id: &str,
+    ) -> std::result::Result<Option<Thread>, &'static str> {
+        let Ok(get_thread_stmt) = self
+            .db
+            .prepare("SELECT * FROM threads WHERE thread_number = ? AND archived = 0")
+            .bind(&[thread_id.into()])
+        else {
+            return Err("Bad request - get_thread_stmt.is_err()");
+        };
+        let Ok(thread_info) = get_thread_stmt.first::<Thread>(None).await else {
+            return Err("Bad request - get_thread_stmt.first().is_err()");
+        };
+
+        Ok(thread_info)
+    }
+
     async fn create_thread(self) -> Result<Response> {
         let BbsCgiForm {
             subject,
@@ -312,7 +342,13 @@ impl<'a> BbsCgiRouter<'a> {
             mail,
             body,
             ..
-        } = self.form;
+        } = &self.form;
+
+        if subject.as_ref().unwrap().len() >= 200 {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "タイトルが長すぎます"),
+            );
+        }
 
         let thread = self.db.prepare(
             "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified) VALUES (?, ?, 1, 1, ?)",
@@ -331,7 +367,18 @@ impl<'a> BbsCgiRouter<'a> {
 
         match (thread, response) {
             (Ok(thread), Ok(response)) => {
-                if self.db.batch(vec![thread, response]).await.is_err() {
+                if let Err(e) = thread.run().await {
+                    return if e.to_string().to_lowercase().contains("unique") {
+                        response_shift_jis_text_html(
+                            WRITING_FAILED_HTML_RESPONSE
+                                .replace("{reason}", "同じ時間に既にスレッドが立っています"),
+                        )
+                    } else {
+                        Response::error("internal server error", 500)
+                    };
+                }
+
+                if response.run().await.is_err() {
                     Response::error("internal server error", 500)
                 } else {
                     response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string())
@@ -348,20 +395,11 @@ impl<'a> BbsCgiRouter<'a> {
             body,
             thread_id,
             ..
-        } = self.form;
+        } = &self.form;
 
         let thread_id = thread_id.clone().unwrap();
 
-        let Ok(get_thread_stmt) = self
-            .db
-            .prepare("SELECT * FROM threads WHERE thread_number = ? AND archived = 0")
-            .bind(&[thread_id.clone().into()])
-        else {
-            return Response::error("Bad request - get_thread_stmt.is_err()", 400);
-        };
-        let Ok(thread_info) = get_thread_stmt.first::<Thread>(None).await else {
-            return Response::error("Bad request - get_thread_stmt.first().is_err()", 400);
-        };
+        let thread_info = self.get_thread(&thread_id).await?;
         if let Some(thread_info) = thread_info {
             if thread_info.active == 0 {
                 return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
