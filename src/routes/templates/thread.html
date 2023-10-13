@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style type="text/css">
+      .response {
+        margin-left: auto;
+        margin-right: auto;
+        width: auto;
+      }
+    </style>
+    <title>{{ thread.title }}</title>
+  </head>
+  <body>
+    <header class="container">
+      <hgroup>
+        <h1>{{ thread.title }}</h1>
+        <h2>@ {{ board.title }}</h2>
+      </hgroup>
+      <nav>
+        <ul>
+          <li>
+            <details role="list">
+              <summary aria-haspopup="listbox" role="button">テーマ</summary>
+              <ul role="listbox">
+                <li><a href="#" data-theme-switcher="auto">Auto</a></li>
+                <li><a href="#" data-theme-switcher="light">Light</a></li>
+                <li><a href="#" data-theme-switcher="dark">Dark</a></li>
+              </ul>
+            </details>
+          </li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="container">
+      <section id="res-list">
+        <ol>
+        {%- for res in responses -%}
+          <li>
+              {% if res.name is not none and res.name|length > 1 -%}
+                {{ res.name | remove_token }}
+              {%- else -%}
+                {{ default_name }}
+              {%- endif -%}
+              <small>   {{ res.date }} ID:{{ res.author_id if res.author_id is not none }}</small>
+          </li>
+          <p>{{ res.body }}</p>
+       {% endfor %}
+       </ol>
+      </section>
+      <section id="terms-of-use">
+        <h3> 利用規約 </h3>
+        <ul>
+          <li>全ての書き込みにおいて投稿者は、その投稿により生じる全ての責任を負います。</li>
+          <li>投稿された書き込みに関しては、投稿者に著作権が帰属するものとします。
+              このため、他者による投稿者からの許諾のない無断での転載は禁止します。
+              その他、著作権法に従うものとします。
+          </li>
+        </ul>
+      </section>
+      <section id="make-res">
+        <h3> 書きこむ </h3>
+         <form id="make-response-form">
+          <div class="grid">
+            <input type="text" name="FROM" placeholder="{{ board.default_name }}" aria-label="Name" />
+            <input type="text" name="mail" placeholder="#で始まる認証トークン" aria-label="Email address" />
+          </div>
+          <input type="hidden" name="submit" value="書き込む">
+          <input type="hidden" name="bbs" value="{{ board.board_key }}">
+          <input type="hidden" name="key" value="{{ thread.thread_number }}">
+          <input type="text" name="MESSAGE" placeholder="本文" aria-label="Body" required />
+          <div class="grid">
+            <label for="terms">
+              <input type="checkbox" role="switch" id="terms" name="terms" required/>
+              <a href="#terms-of-use">利用規約</a>に同意します。
+            </label>
+            <button type="submit">投稿</button>
+          </div>
+        </form>
+      </section>
+    </main>
+  </body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+  <script>
+window.addEventListener("load", () => {
+  const form = document.getElementById("make-response-form");
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData(form);
+    const urlEncodedDataPairs = [];
+    for (const [name, value] of formData.entries()) {
+      const valueArray = Encoding.stringToCode(value);
+      const sjisValueArray = Encoding.convert(valueArray, {to: "SJIS", from: "UNICODE"});
+      const encodedValue = Encoding.urlEncode(sjisValueArray);
+      urlEncodedDataPairs.push(`${encodeURIComponent(name)}=${encodedValue}`);
+    }
+    const urlEncodedData = urlEncodedDataPairs.join("&").replace(/%20/g, "+");
+    xhr.addEventListener("error", (event) => { window.alert("書きこみに失敗しました"); });
+    xhr.open("POST", "../../test/bbs.cgi", true);
+    xhr.onload = () => {
+      if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+        has2ChError = xhr.responseText.startsWith("<html><!-- 2ch_X:error -->");
+        if (!has2ChError && window.confirm("書きこみに成功しました。ページを更新しますか？")) {
+          window.location.reload();
+        };
+      }
+      if (xhr.readyState === XMLHttpRequest.DONE && (xhr.status !== 200 || has2ChError)) {
+        window.alert("書きこみに失敗しました。");
+      }
+    };
+    xhr.send(urlEncodedData);
+  });
+});
+const themeSwitcher = {
+  _scheme: "auto",
+  menuTarget: "details[role=list]",
+  buttonsTarget: "a[data-theme-switcher]",
+  buttonAttribute: "data-theme-switcher",
+  rootAttribute: "data-theme",
+  localStorageKey: "picoPreferredColorScheme",
+  init() { this.scheme = this.schemeFromLocalStorage; this.initSwitchers();},
+  get schemeFromLocalStorage() {
+    if (typeof window.localStorage !== "undefined") {
+      if (window.localStorage.getItem(this.localStorageKey) !== null) {
+        return window.localStorage.getItem(this.localStorageKey);
+      }
+    }
+    return this._scheme;
+  },
+  get preferredColorScheme() {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  },
+  initSwitchers() {
+    const buttons = document.querySelectorAll(this.buttonsTarget);
+    buttons.forEach((button) => {
+      button.addEventListener(
+        "click",
+        (event) => {
+          event.preventDefault();
+          this.scheme = button.getAttribute(this.buttonAttribute);
+          document.querySelector(this.menuTarget).removeAttribute("open");
+        },
+        false
+      );
+    });
+  },
+  set scheme(scheme) {
+    if (scheme == "auto") {
+      this.preferredColorScheme == "dark" ? (this._scheme = "dark") : (this._scheme = "light");
+    } else if (scheme == "dark" || scheme == "light") {
+      this._scheme = scheme;
+    }
+    this.applyScheme();
+    this.schemeToLocalStorage();
+  },
+  get scheme() { return this._scheme;},
+  applyScheme() { document.querySelector("html").setAttribute(this.rootAttribute, this.scheme);},
+  schemeToLocalStorage() {
+    if (typeof window.localStorage !== "undefined") {
+      window.localStorage.setItem(this.localStorageKey, this.scheme);
+    }
+  },
+};
+themeSwitcher.init();
+  </script>
+</html>

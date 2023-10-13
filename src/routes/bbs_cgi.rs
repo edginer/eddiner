@@ -155,12 +155,7 @@ impl<'a> BbsCgiRouter<'a> {
             Some(form) => form,
             None => return Err(Response::error("Bad request", 400)),
         };
-        let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned)) else {
-            return Err(Response::error(
-                "internal server error - failed to parse url",
-                500,
-            ));
-        };
+        let host_url = utils::get_host_url(&req)?;
 
         Ok(Self {
             db,
@@ -197,7 +192,6 @@ impl<'a> BbsCgiRouter<'a> {
             };
 
             if let Ok(Some(r)) = stmt.first::<AuthedCookie>(None).await {
-                console_debug!("{:?}", r);
                 if r.authed == 1 {
                     Some(r)
                 } else {
