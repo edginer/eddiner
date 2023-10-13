@@ -20,6 +20,8 @@ const WRITING_FAILED_HTML_RESPONSE: &str =
 const REQUEST_AUTHENTICATION_HTML: &str = include_str!("templates/request_authentication.html");
 const REQUEST_AUTHENTICATION_CODE_HTML: &str =
     include_str!("templates/request_authentication_code.html");
+const REQUEST_AUTHENTICATION_LOCAL: &str =
+    include_str!("templates/request_authentication_local.html");
 
 #[derive(Debug, Clone)]
 struct BbsCgiForm {
@@ -98,11 +100,12 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
 
 pub async fn route_bbs_cgi(
     req: &mut Request,
+    env: &Env,
     ua: Option<String>,
     db: &D1Database,
     token_cookie: Option<&str>,
 ) -> Result<Response> {
-    let router = match BbsCgiRouter::new(req, db, token_cookie, ua).await {
+    let router = match BbsCgiRouter::new(req, env, db, token_cookie, ua).await {
         Ok(router) => router,
         Err(resp) => return resp,
     };
@@ -119,21 +122,31 @@ struct BbsCgiRouter<'a> {
     id: Option<String>,
     ua: Option<String>,
     host_url: String,
+    local_debugging: bool,
 }
 
 impl<'a> BbsCgiRouter<'a> {
     async fn new(
         req: &'a mut Request,
+        env: &Env,
         db: &'a D1Database,
         token_cookie: Option<&'a str>,
         ua: Option<String>,
     ) -> std::result::Result<BbsCgiRouter<'a>, Result<Response>> {
-        let Ok(Some(ip_addr)) = req.headers().get("CF-Connecting-IP") else {
-            return Err(Response::error(
-                "internal server error - cf-connecting-ip",
-                500,
-            ));
-        };
+        let (ip_addr, local_debugging) =
+            if let Ok(Some(ip_addr)) = req.headers().get("CF-Connecting-IP") {
+                (ip_addr, false)
+            } else {
+                // Use DEBUG_IP if it is set
+                if let Ok(ip_addr) = env.var("DEBUG_IP") {
+                    (ip_addr.to_string(), true)
+                } else {
+                    return Err(Response::error(
+                        "internal server error - cf-connecting-ip",
+                        500,
+                    ));
+                }
+            };
 
         let Ok(req_bytes) = req.bytes().await else {
             return Err(Response::error("Bad request", 400));
@@ -142,7 +155,6 @@ impl<'a> BbsCgiRouter<'a> {
             Some(form) => form,
             None => return Err(Response::error("Bad request", 400)),
         };
-
         let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned)) else {
             return Err(Response::error(
                 "internal server error - failed to parse url",
@@ -159,6 +171,7 @@ impl<'a> BbsCgiRouter<'a> {
             id: None,
             ua,
             host_url,
+            local_debugging,
         })
     }
 
@@ -184,6 +197,7 @@ impl<'a> BbsCgiRouter<'a> {
             };
 
             if let Ok(Some(r)) = stmt.first::<AuthedCookie>(None).await {
+                console_debug!("{:?}", r);
                 if r.authed == 1 {
                     Some(r)
                 } else {
@@ -225,13 +239,14 @@ impl<'a> BbsCgiRouter<'a> {
 
             let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false);
 
-            let auth_body = if is_mate {
+            let auth_body = if self.local_debugging {
+                REQUEST_AUTHENTICATION_LOCAL.replace("{token}", &token)
+            } else if is_mate {
                 REQUEST_AUTHENTICATION_HTML
                     .replace("{token}", &token)
                     .replace("{host_url}", &self.host_url)
             } else {
                 REQUEST_AUTHENTICATION_CODE_HTML
-                    .replace("{token}", &token)
                     .replace("{auth_code}", &auth_code)
                     .replace("{host_url}", &self.host_url)
             };
