@@ -91,7 +91,9 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let mut result = route_subject_txt(&db).await?;
 
             if let Ok(result) = result.cloned() {
-                let _ = cache.put(&req, result).await;
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
             }
 
             Ok(result)
