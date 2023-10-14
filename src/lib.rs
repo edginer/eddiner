@@ -129,8 +129,9 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             route_dat(e, range, if_modified_since, &db).await
         }
-        e if e.starts_with("/liveedge/") => {
-            let rest_url = &e["/liveedge/".len()..];
+        e if e.starts_with("/liveedge/") || e.starts_with("/test/read.cgi/liveedge/") => {
+            let board_idx = e.find("/liveedge/").unwrap();
+            let rest_url = &e[board_idx + "/liveedge/".len()..];
             let slash_idx = if let Some(slash_idx) = rest_url.find("/") {
                 match &rest_url[slash_idx..] {
                     "/" | "/index.html" => slash_idx,
