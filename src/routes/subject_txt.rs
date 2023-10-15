@@ -18,8 +18,7 @@ pub async fn route_subject_txt(db: &D1Database) -> Result<Response> {
         return Response::error("internal server error: convertion", 500);
     };
 
-    threads.sort_by_key(|x| x.last_modified.parse::<u64>().unwrap());
-    threads.reverse();
+    threads.sort_by_key(|x| u64::max_value() - x.last_modified.parse::<u64>().unwrap());
 
     let threads_body = threads.format_threads();
     response_shift_jis_text_plain_with_cache(threads_body)
