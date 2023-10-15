@@ -12,6 +12,7 @@ use routes::{
 use worker::*;
 
 mod authed_cookie;
+pub(crate) mod inmemory_cache;
 pub mod response;
 mod thread;
 mod utils;

@@ -4,6 +4,7 @@ use pwhash::unix;
 use sha1::Sha1;
 use worker::*;
 
+use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip};
 use crate::{
     authed_cookie::AuthedCookie,
     thread::Thread,
@@ -175,6 +176,7 @@ impl<'a> BbsCgiRouter<'a> {
                 }
             };
 
+        console_debug!("{:?}", ip_addr);
         let Ok(req_bytes) = req.bytes().await else {
             return Err(Response::error("Bad request", 400));
         };
@@ -209,6 +211,13 @@ impl<'a> BbsCgiRouter<'a> {
     }
 
     async fn route(mut self) -> Result<Response> {
+        // Reject too fast reponses by IP here
+        if maybe_reject_ip(&self.ip_addr)? {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
+            );
+        }
+
         if self.form.board_key != "liveedge" {
             return Response::error("Bad request", 400);
         }
@@ -230,7 +239,6 @@ impl<'a> BbsCgiRouter<'a> {
             };
 
             if let Ok(Some(r)) = stmt.first::<AuthedCookie>(None).await {
-                console_debug!("{:?}", r);
                 if r.authed == 1 {
                     Some(r)
                 } else {
@@ -296,6 +304,13 @@ impl<'a> BbsCgiRouter<'a> {
 
             return resp;
         };
+
+        // Reject too fast reponses by cookie here
+        if maybe_reject_cookie(&authenticated_user_cookie.cookie)? {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
+            );
+        }
 
         if let Some(s) = &authenticated_user_cookie.last_wrote_time {
             if self.unix_time - s.parse::<u64>().unwrap() < 5 {
