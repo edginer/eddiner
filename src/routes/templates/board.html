@@ -29,7 +29,7 @@
 
     <main class="container">
       <section id="thread-list">
-        <h2> スレッド一覧 </h2>
+        <h3> スレッド一覧 </h3>
         <ul>
           {%- for thread in threads -%}
             <p><a href=/{{ board.board_key }}/{{ thread.thread_number }}/>{{ loop.index }}: {{ thread.title }} ({{ thread.response_count }})</a></p>
@@ -37,7 +37,7 @@
         </ul>
       </section>
       <section id="terms-of-use">
-        <h2> 利用規約 </h2>
+        <h3> 利用規約 </h3>
         <ul>
           <li>全ての書き込みにおいて投稿者は、その投稿により生じる全ての責任を負います。</li>
           <li>投稿された書き込みに関しては、投稿者に著作権が帰属するものとします。
