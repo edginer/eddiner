@@ -412,7 +412,7 @@ impl<'a> BbsCgiRouter<'a> {
         ).bind(&[self.unix_time.to_string().into(), subject.clone().unwrap().into(), self.unix_time.to_string().into()]);
 
         let response = self.db.prepare(
-            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(&[name.into(),
             mail.into(),
             get_current_date_time_string().into(),
@@ -420,6 +420,7 @@ impl<'a> BbsCgiRouter<'a> {
             body.into(),
             self.unix_time.to_string().into(),
             self.ip_addr.into(),
+            self.token_cookie.unwrap().into(),
         ]);
 
         match (thread, response) {
@@ -490,7 +491,7 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         let response = self.db.prepare(
-            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(&[
             name.into(),
             mail.into(),
@@ -498,7 +499,8 @@ impl<'a> BbsCgiRouter<'a> {
             self.id.unwrap().into(),
             body.into(),
             thread_id.into(),
-            self.ip_addr.into()
+            self.ip_addr.into(),
+            self.token_cookie.unwrap().into(),
         ]);
         if response.is_err() {
             return Response::error("Bad request - response.is_err()", 400);

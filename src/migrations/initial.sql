@@ -35,7 +35,10 @@ CREATE TABLE authed_cookies (
     cookie TEXT NOT NULL,
     authed_time TEXT,
     origin_ip TEXT NOT NULL,
-    authed INTEGER NOT NULL
+    authed INTEGER NOT NULL,
+    writed_time TEXT,
+    auth_code TEXT,
+    last_wrote_time TEXT
 );
 
 INSERT INTO boards (name) VALUES ('なんでも実況エッヂ');
@@ -53,3 +56,8 @@ INSERT INTO responses (
     '127.0.0.1'
 );
 
+CREATE INDEX authed_cookies_cookie_idx ON authed_cookies(cookie);
+CREATE INDEX authed_cookies_origin_ip ON authed_cookies(origin_ip);
+
+CREATE INDEX threads_thread_number_idx ON threads(thread_number);
+CREATE INDEX responses_thread_number_idx ON responses(thread_id);
