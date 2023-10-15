@@ -8,13 +8,15 @@ use crate::{
 
 pub async fn route_dat(
     path: &str,
+    ua: &Option<String>,
     range: Option<String>,
     if_modified_since: Option<String>,
     db: &D1Database,
+    host: String,
 ) -> Result<Response> {
     let thread_id = path.replace(".dat", "").replace("/liveedge/dat/", "");
     let Ok(thread_id) = thread_id.parse::<u64>() else {
-        return Response::error("Bad request", 400);
+        return Response::error("Bad request - url parsing", 400);
     };
     let thread_id = thread_id.to_string();
     // TODO (kenmo-melon): Get the default name from the board config
@@ -56,14 +58,23 @@ pub async fn route_dat(
     let Ok(responses) = responses_binded_stmt.all().await else {
         return Response::error("internal server error", 500);
     };
-    let Ok(responses): Result<Vec<Res>> = responses.results::<Res>() else {
+    let Ok(mut responses): Result<Vec<Res>> = responses.results::<Res>() else {
         return Response::error("internal server error", 500);
     };
 
+    if host.contains("workers.dev") {
+        if let Some(first_res) = responses.get_mut(0) {
+            first_res.body
+                .push_str(
+                    "<br><br> 【以下運営からのメッセージ】<br>あなたは将来的に廃止される旧ドメインを使用しています。 <br>新ドメイン https://bbs.eddibb.cc/liveedge/ に移行してください"
+                )
+        }
+    }
+
     let body = responses.format_responses(&thread.title, default_name);
 
-    match range {
-        Some(range) => {
+    match (range, ua) {
+        (Some(range), Some(ua)) if !ua.contains("Mate") && !ua.contains("Xeno") => {
             if let Some(range) = range.split('=').nth(1) {
                 let range = range.split('-').collect::<Vec<_>>();
                 let Some(start) = range.first().and_then(|x| x.parse::<usize>().ok()) else {
@@ -75,6 +86,6 @@ pub async fn route_dat(
                 response_shift_jis_text_plain_with_cache(body)
             }
         }
-        None => response_shift_jis_text_plain_with_cache(body),
+        _ => response_shift_jis_text_plain_with_cache(body),
     }
 }

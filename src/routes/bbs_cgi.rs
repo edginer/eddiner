@@ -36,6 +36,33 @@ struct BbsCgiForm {
     cap: Option<String>,
 }
 
+impl BbsCgiForm {
+    fn validate(&self) -> std::result::Result<(), &'static str> {
+        if matches!(&self.subject, Some(subject) if subject.chars().count() > 96) {
+            return Err("スレッドタイトルが長すぎます");
+        }
+
+        if self.name.chars().count() > 64 {
+            return Err("名前が長すぎます");
+        }
+
+        if self.mail.chars().count() > 64 {
+            return Err("メールアドレスが長すぎます");
+        }
+
+        let body_chars = self.body.chars().collect::<Vec<_>>();
+        if body_chars.len() > 4096 {
+            return Err("本文が長すぎます");
+        }
+
+        if body_chars.iter().filter(|&&x| x == '\n').count() > 32 {
+            return Err("本文に改行が多すぎます");
+        }
+
+        Ok(())
+    }
+}
+
 fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     let data = encoding_rs::SHIFT_JIS.decode(&bytes).0.to_string();
 
@@ -163,6 +190,12 @@ impl<'a> BbsCgiRouter<'a> {
                 500,
             ));
         };
+
+        if let Err(e) = form.validate() {
+            return Err(response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", e),
+            ));
+        }
 
         Ok(Self {
             db,
@@ -374,12 +407,6 @@ impl<'a> BbsCgiRouter<'a> {
             ..
         } = &self.form;
 
-        if subject.as_ref().unwrap().len() >= 200 {
-            return response_shift_jis_text_html(
-                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "タイトルが長すぎます"),
-            );
-        }
-
         let thread = self.db.prepare(
             "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified) VALUES (?, ?, 1, 1, ?)",
         ).bind(&[self.unix_time.to_string().into(), subject.clone().unwrap().into(), self.unix_time.to_string().into()]);
@@ -558,6 +585,42 @@ mod tests {
 
         for (case, expected) in test_cases.iter() {
             assert_eq!(&calculate_trip(case), expected);
+        }
+    }
+
+    #[test]
+    fn test_form_validation() {
+        let test_cases = [
+            (
+                BbsCgiForm {
+                    subject: Some("あ".repeat(97)),
+                    name: "".to_string(),
+                    mail: "".to_string(),
+                    body: "a".repeat(12),
+                    board_key: "abc".to_string(),
+                    is_thread: true,
+                    thread_id: None,
+                    cap: None,
+                },
+                Err("スレッドタイトルが長すぎます"),
+            ),
+            (
+                BbsCgiForm {
+                    subject: None,
+                    name: "".to_string(),
+                    mail: "".to_string(),
+                    body: "あい\n".repeat(60).to_string(),
+                    board_key: "abc".to_string(),
+                    is_thread: true,
+                    thread_id: None,
+                    cap: None,
+                },
+                Err("本文に改行が多すぎます"),
+            ),
+        ];
+
+        for (case, expected) in test_cases.into_iter() {
+            assert_eq!(expected, case.validate());
         }
     }
 }
