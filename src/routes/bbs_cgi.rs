@@ -35,6 +35,33 @@ struct BbsCgiForm {
     cap: Option<String>,
 }
 
+impl BbsCgiForm {
+    fn validate(&self) -> std::result::Result<(), &'static str> {
+        if matches!(&self.subject, Some(subject) if subject.chars().count() > 96) {
+            return Err("スレッドタイトルが長すぎます");
+        }
+
+        if self.name.chars().count() > 64 {
+            return Err("名前が長すぎます");
+        }
+
+        if self.mail.chars().count() > 64 {
+            return Err("メールアドレスが長すぎます");
+        }
+
+        let body_chars = self.body.chars().collect::<Vec<_>>();
+        if body_chars.len() > 4096 {
+            return Err("本文が長すぎます");
+        }
+
+        if body_chars.iter().filter(|&&x| x == '\n').count() > 32 {
+            return Err("本文に改行が多すぎます");
+        }
+
+        Ok(())
+    }
+}
+
 fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     let data = encoding_rs::SHIFT_JIS.decode(&bytes).0.to_string();
 
@@ -161,6 +188,12 @@ impl<'a> BbsCgiRouter<'a> {
                 500,
             ));
         };
+
+        if let Err(e) = form.validate() {
+            return Err(response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", e),
+            ));
+        }
 
         Ok(Self {
             db,
@@ -358,12 +391,6 @@ impl<'a> BbsCgiRouter<'a> {
             body,
             ..
         } = &self.form;
-
-        if subject.as_ref().unwrap().len() >= 200 {
-            return response_shift_jis_text_html(
-                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "タイトルが長すぎます"),
-            );
-        }
 
         let thread = self.db.prepare(
             "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified) VALUES (?, ?, 1, 1, ?)",
