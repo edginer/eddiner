@@ -12,6 +12,7 @@ pub async fn route_dat(
     range: Option<String>,
     if_modified_since: Option<String>,
     db: &D1Database,
+    host: String,
 ) -> Result<Response> {
     let thread_id = path.replace(".dat", "").replace("/liveedge/dat/", "");
     let Ok(thread_id) = thread_id.parse::<u64>() else {
@@ -57,9 +58,18 @@ pub async fn route_dat(
     let Ok(responses) = responses_binded_stmt.all().await else {
         return Response::error("internal server error", 500);
     };
-    let Ok(responses): Result<Vec<Res>> = responses.results::<Res>() else {
+    let Ok(mut responses): Result<Vec<Res>> = responses.results::<Res>() else {
         return Response::error("internal server error", 500);
     };
+
+    if host.contains("workers.dev") {
+        if let Some(first_res) = responses.get_mut(0) {
+            first_res.body
+                .push_str(
+                    "<br><br> 【以下運営からのメッセージ】<br>あなたは将来的に廃止される旧ドメインを使用しています。 <br>新ドメイン https://bbs.eddibb.cc/liveedge/ に移行してください"
+                )
+        }
+    }
 
     let body = responses.format_responses(&thread.title, default_name);
 

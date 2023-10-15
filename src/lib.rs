@@ -122,7 +122,11 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Ok(s);
             }
 
-            let mut result = route_dat(e, &ua, range, if_modified_since, &db).await?;
+            let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned))
+            else {
+                return Response::error("internal server error - failed to parse url", 500);
+            };
+            let mut result = route_dat(e, &ua, range, if_modified_since, &db, host_url).await?;
 
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
