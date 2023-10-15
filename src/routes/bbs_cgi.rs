@@ -572,4 +572,40 @@ mod tests {
             assert_eq!(&calculate_trip(case), expected);
         }
     }
+
+    #[test]
+    fn test_form_validation() {
+        let test_cases = [
+            (
+                BbsCgiForm {
+                    subject: Some("あ".repeat(97)),
+                    name: "".to_string(),
+                    mail: "".to_string(),
+                    body: "a".repeat(12),
+                    board_key: "abc".to_string(),
+                    is_thread: true,
+                    thread_id: None,
+                    cap: None,
+                },
+                Err("スレッドタイトルが長すぎます"),
+            ),
+            (
+                BbsCgiForm {
+                    subject: None,
+                    name: "".to_string(),
+                    mail: "".to_string(),
+                    body: "あい\n".repeat(60).to_string(),
+                    board_key: "abc".to_string(),
+                    is_thread: true,
+                    thread_id: None,
+                    cap: None,
+                },
+                Err("本文に改行が多すぎます"),
+            ),
+        ];
+
+        for (case, expected) in test_cases.into_iter() {
+            assert_eq!(expected, case.validate());
+        }
+    }
 }
