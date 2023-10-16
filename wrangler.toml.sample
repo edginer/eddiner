@@ -10,6 +10,10 @@ binding = "DB" # i.e. available in your Worker on env.DB
 database_name = "zerochedge-d1"
 database_id = "<fill-your-d1-database-id>"
 
+[[r2_buckets]]
+binding = 'ARCHIVE_BUCKET'
+bucket_name = 'edge-archive-bucket'
+
 [vars]
 SITE_KEY = "<fill-your-turnstili-site-key>"
 SECRET_KEY = "<fill-your-turnstili-secret-key>"

@@ -115,6 +115,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
+            let bucket = env.bucket("ARCHIVE_BUCKET").ok();
 
             let range = req.headers().get("Range").ok().flatten();
             let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
@@ -127,7 +128,8 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             else {
                 return Response::error("internal server error - failed to parse url", 500);
             };
-            let mut result = route_dat(e, &ua, range, if_modified_since, &db, host_url).await?;
+            let mut result =
+                route_dat(e, &ua, range, if_modified_since, &db, &bucket, host_url).await?;
 
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
