@@ -4,6 +4,7 @@ use pwhash::unix;
 use sha1::Sha1;
 use worker::*;
 
+use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip};
 use crate::{
     authed_cookie::AuthedCookie,
     thread::Thread,
@@ -33,6 +34,33 @@ struct BbsCgiForm {
     is_thread: bool,
     thread_id: Option<String>,
     cap: Option<String>,
+}
+
+impl BbsCgiForm {
+    fn validate(&self) -> std::result::Result<(), &'static str> {
+        if matches!(&self.subject, Some(subject) if subject.chars().count() > 96) {
+            return Err("スレッドタイトルが長すぎます");
+        }
+
+        if self.name.chars().count() > 64 {
+            return Err("名前が長すぎます");
+        }
+
+        if self.mail.chars().count() > 64 {
+            return Err("メールアドレスが長すぎます");
+        }
+
+        let body_chars = self.body.chars().collect::<Vec<_>>();
+        if body_chars.len() > 4096 {
+            return Err("本文が長すぎます");
+        }
+
+        if body_chars.iter().filter(|&&x| x == '\n').count() > 32 {
+            return Err("本文に改行が多すぎます");
+        }
+
+        Ok(())
+    }
 }
 
 fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
@@ -148,6 +176,7 @@ impl<'a> BbsCgiRouter<'a> {
                 }
             };
 
+        console_debug!("{:?}", ip_addr);
         let Ok(req_bytes) = req.bytes().await else {
             return Err(Response::error("Bad request", 400));
         };
@@ -156,6 +185,12 @@ impl<'a> BbsCgiRouter<'a> {
             None => return Err(Response::error("Bad request", 400)),
         };
         let host_url = utils::get_host_url(&req)?;
+
+        if let Err(e) = form.validate() {
+            return Err(response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", e),
+            ));
+        }
 
         Ok(Self {
             db,
@@ -171,6 +206,13 @@ impl<'a> BbsCgiRouter<'a> {
     }
 
     async fn route(mut self) -> Result<Response> {
+        // Reject too fast reponses by IP here
+        if maybe_reject_ip(&self.ip_addr)? {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
+            );
+        }
+
         if self.form.board_key != "liveedge" {
             return Response::error("Bad request", 400);
         }
@@ -257,6 +299,13 @@ impl<'a> BbsCgiRouter<'a> {
 
             return resp;
         };
+
+        // Reject too fast reponses by cookie here
+        if maybe_reject_cookie(&authenticated_user_cookie.cookie)? {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
+            );
+        }
 
         if let Some(s) = &authenticated_user_cookie.last_wrote_time {
             if self.unix_time - s.parse::<u64>().unwrap() < 5 {
@@ -352,12 +401,6 @@ impl<'a> BbsCgiRouter<'a> {
             body,
             ..
         } = &self.form;
-
-        if subject.as_ref().unwrap().len() >= 200 {
-            return response_shift_jis_text_html(
-                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "タイトルが長すぎます"),
-            );
-        }
 
         let thread = self.db.prepare(
             "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified) VALUES (?, ?, 1, 1, ?)",
@@ -537,6 +580,42 @@ mod tests {
 
         for (case, expected) in test_cases.iter() {
             assert_eq!(&calculate_trip(case), expected);
+        }
+    }
+
+    #[test]
+    fn test_form_validation() {
+        let test_cases = [
+            (
+                BbsCgiForm {
+                    subject: Some("あ".repeat(97)),
+                    name: "".to_string(),
+                    mail: "".to_string(),
+                    body: "a".repeat(12),
+                    board_key: "abc".to_string(),
+                    is_thread: true,
+                    thread_id: None,
+                    cap: None,
+                },
+                Err("スレッドタイトルが長すぎます"),
+            ),
+            (
+                BbsCgiForm {
+                    subject: None,
+                    name: "".to_string(),
+                    mail: "".to_string(),
+                    body: "あい\n".repeat(60).to_string(),
+                    board_key: "abc".to_string(),
+                    is_thread: true,
+                    thread_id: None,
+                    cap: None,
+                },
+                Err("本文に改行が多すぎます"),
+            ),
+        ];
+
+        for (case, expected) in test_cases.into_iter() {
+            assert_eq!(expected, case.validate());
         }
     }
 }

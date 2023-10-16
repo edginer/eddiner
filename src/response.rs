@@ -17,7 +17,7 @@ pub trait Ch5ResponsesFormatter {
     fn format_responses(&self, thread_title: &str, default_name: &str) -> String;
 }
 
-const DAT_TEMPLATE: &'static str = "
+const DAT_TEMPLATE: &str = "
 {%- for res in responses -%}
   {%- if res.name is not none and res.name|length > 1 -%}
     {{ res.name | remove_token }}
@@ -42,8 +42,9 @@ impl TokenRemover {
             default: default.to_owned(),
         }
     }
+
     pub(crate) fn remove(&self, name: String) -> String {
-        if name.starts_with("#") || (name.len() >= 30 && self.regex.is_match(&name)) {
+        if name.starts_with('#') || (name.len() >= 30 && self.regex.is_match(&name)) {
             self.default.clone()
         } else {
             name
@@ -60,7 +61,20 @@ impl Ch5ResponsesFormatter for Vec<Res> {
         env.add_filter("remove_token", move |name| token_remover.remove(name));
         env.add_template("0000000000.dat", DAT_TEMPLATE).unwrap();
         let tmpl = env.get_template("0000000000.dat").unwrap();
-        tmpl.render(context!(responses => self, thread_title, default_name))
+        let ress = self
+            .iter()
+            .map(|x| Res {
+                name: x.name.clone().map(|name| name.chars().take(32).collect()),
+                body: x
+                    .body
+                    .replace("edge.edgebb.workers.dev", "bbs.eddibb.cc")
+                    .chars()
+                    .take(4096)
+                    .collect(),
+                ..x.clone()
+            })
+            .collect::<Vec<_>>();
+        tmpl.render(context!(responses => ress, thread_title, default_name))
             .unwrap()
     }
 }

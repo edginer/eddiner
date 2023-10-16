@@ -12,6 +12,7 @@ use routes::{
 use worker::*;
 
 mod authed_cookie;
+pub(crate) mod inmemory_cache;
 pub mod response;
 mod thread;
 mod utils;
@@ -60,6 +61,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return Response::error("internal server error", 500);
     };
 
+    let cache = Cache::default();
     let token_cookie = get_token_cookies(&req);
     let ua = req.headers().get("User-Agent").ok().flatten();
 
@@ -90,17 +92,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
         "/" | "/index.html" => webui::route_index("edgebb", "えっぢ", "掲示板", &BOARDS)
             .map_err(|e| Error::RustError(format!("Error in index.rs {}", e))),
-        "/test/bbs.cgi" => {
-            if req.method() != Method::Post {
-                return Response::error("Bad request", 400);
-            }
-
-            let Ok(db) = env.d1("DB") else {
-                return Response::error("internal server error - db", 500);
-            };
-
-            route_bbs_cgi(&mut req, &env, ua, &db, token_cookie.as_deref()).await
-        }
         "/liveedge/" | "/liveedge" => {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error - db", 500);
@@ -113,12 +104,34 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
         "/liveedge/SETTING.TXT" => routes::setting_txt::route_setting_txt(),
         "/liveedge/subject.txt" => {
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
-            route_subject_txt(&db).await
+            let mut result = route_subject_txt(&db).await?;
+
+            if let Ok(result) = result.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+
+            Ok(result)
         }
         "/liveedge/head.txt" => route_head_txt(),
+        "/test/bbs.cgi" => {
+            if req.method() != Method::Post {
+                return Response::error("Bad request", 400);
+            }
+
+            let Ok(db) = env.d1("DB") else {
+                return Response::error("internal server error - db", 500);
+            };
+
+            route_bbs_cgi(&mut req, &env, ua, &db, token_cookie.as_deref()).await
+        }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
@@ -127,7 +140,23 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let range = req.headers().get("Range").ok().flatten();
             let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
 
-            route_dat(e, range, if_modified_since, &db).await
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
+
+            let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned))
+            else {
+                return Response::error("internal server error - failed to parse url", 500);
+            };
+            let mut result = route_dat(e, &ua, range, if_modified_since, &db, host_url).await?;
+
+            if let Ok(result) = result.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+
+            Ok(result)
         }
         e if e.starts_with("/liveedge/") || e.starts_with("/test/read.cgi/liveedge/") => {
             let board_idx = e.find("/liveedge/").unwrap();
