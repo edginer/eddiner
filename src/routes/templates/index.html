@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <title>{{ site_title }}</title>
+  </head>
+  <body>
+    <header class="container">
+      <hgroup>
+        <h1>{{ site_name }}</h1>
+        <h2>{{ site_description }}
+      </hgroup>
+      <nav>
+        <ul>
+          <li>
+            <details role="list">
+              <summary aria-haspopup="listbox" role="button">テーマ</summary>
+              <ul role="listbox">
+                <li><a href="#" data-theme-switcher="light">Auto</a></li>
+                <li><a href="#" data-theme-switcher="light">Light</a></li>
+                <li><a href="#" data-theme-switcher="dark">Dark</a></li>
+              </ul>
+            </details>
+          </li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="container">
+      <section id="how-to-auth">
+        <h2> 認証のやり方 </h2>
+        #で始まる認証トークンを取得し、書きこみ時にメール欄にはりつけて下さい。ChMateなどクッキーを保存する専ブラを使用している場合は、2回目以降の書きこみではトークンをはりつけなくても大丈夫です。トークンの取得方法は専ブラにより異なります。
+        <ul>
+          <li>Chmateの場合、最初の書きこみ時に表示されたURLにアクセスしてください。</li>
+          <li>その他の場合、最初の書きこみ時に表示される認証コードを、<a href="/auth-code">認証URL</a>で表示されるフォームに入力し、送信してください。</li>
+        </ul>
+      </section>
+      <section id="board-list">
+        <h2> 掲示板一覧 </h2>
+        <ul>
+          {%- for board in boards -%}
+            <p><a href={{ board.board_key }}> {{ board.title }} </a></p>
+          {% endfor %}
+        </ul>
+      </section>
+      <section id="terms-of-use">
+        <h2> 利用規約 </h2>
+        <ul>
+          <li>全ての書き込みにおいて投稿者は、その投稿により生じる全ての責任を負います。</li>
+          <li>投稿された書き込みに関しては、投稿者に著作権が帰属するものとします。
+              このため、他者による投稿者からの許諾のない無断での転載は禁止します。
+              その他、著作権法に従うものとします。
+          </li>
+        </ul>
+      </section>
+      <section id="note">
+        <h3> 留意事項 </h3>
+        <p>本板はあくまで試験的運用であることに留意してください</p>
+      </section>
+      <section id="issue">
+        <h3> 要望・バグ報告など </h3>
+        <p><a href="https://git.3chan.cc/edginer/eddiner/issues">運営・開発への要望・相談・報告はこちらへ</a></p>
+      </section>
+    </main>
+  </body>
+  <script>
+const themeSwitcher = {
+  _scheme: "auto",
+  menuTarget: "details[role=list]",
+  buttonsTarget: "a[data-theme-switcher]",
+  buttonAttribute: "data-theme-switcher",
+  rootAttribute: "data-theme",
+  localStorageKey: "picoPreferredColorScheme",
+  init() { this.scheme = this.schemeFromLocalStorage; this.initSwitchers();},
+  get schemeFromLocalStorage() {
+    if (typeof window.localStorage !== "undefined") {
+      if (window.localStorage.getItem(this.localStorageKey) !== null) {
+        return window.localStorage.getItem(this.localStorageKey);
+      }
+    }
+    return this._scheme;
+  },
+  get preferredColorScheme() {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  },
+  initSwitchers() {
+    const buttons = document.querySelectorAll(this.buttonsTarget);
+    buttons.forEach((button) => {
+      button.addEventListener(
+        "click",
+        (event) => {
+          event.preventDefault();
+          this.scheme = button.getAttribute(this.buttonAttribute);
+          document.querySelector(this.menuTarget).removeAttribute("open");
+        },
+        false
+      );
+    });
+  },
+  set scheme(scheme) {
+    if (scheme == "auto") {
+      this.preferredColorScheme == "dark" ? (this._scheme = "dark") : (this._scheme = "light");
+    } else if (scheme == "dark" || scheme == "light") {
+      this._scheme = scheme;
+    }
+    this.applyScheme();
+    this.schemeToLocalStorage();
+  },
+  get scheme() { return this._scheme;},
+  applyScheme() { document.querySelector("html").setAttribute(this.rootAttribute, this.scheme);},
+  schemeToLocalStorage() {
+    if (typeof window.localStorage !== "undefined") {
+      window.localStorage.setItem(this.localStorageKey, this.scheme);
+    }
+  },
+};
+
+// Init
+themeSwitcher.init();
+  </script>
+</html>
