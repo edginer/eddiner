@@ -87,14 +87,16 @@ window.addEventListener("load", () => {
     xhr.addEventListener("error", (event) => { window.alert("スレ立てに失敗しました。"); });
     xhr.open("POST", "../../test/bbs.cgi", true);
     xhr.onload = () => {
-      var has2ChError = false;
       if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
-        has2ChError = xhr.responseText.startsWith("<html><!-- 2ch_X:error -->");
-        if (!has2ChError && window.confirm("スレ立てに失敗しました。ページを更新しますか？")) {
+        if (xhr.responseText.startsWith("<html><!-- 2ch_X:error -->")) {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(xhr.responseText, "text/html");
+          window.alert(htmlDoc.body.firstChild.textContent);
+        } else if (window.confirm("スレ立てに成功しました。ページを更新しますか？")) {
           window.location.reload();
         };
       }
-      if (xhr.readyState === XMLHttpRequest.DONE && (xhr.status !== 200 || has2ChError)) {
+      if (xhr.readyState === XMLHttpRequest.DONE && xhr.status !== 200) {
         window.alert("スレ立てに失敗しました。");
       }
     };
