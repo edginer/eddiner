@@ -68,7 +68,7 @@ pub async fn route_dat(
         }
     }
 
-    let mut responses = match get_all_responses(&thread_id, &db).await {
+    let mut responses = match get_all_responses(&thread_id, db).await {
         Ok(responses) => responses,
         Err(e) => return e,
     };

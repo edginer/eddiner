@@ -11,6 +11,7 @@ pub struct Res {
     pub body: String,
     pub thread_id: String,
     pub ip_addr: String,
+    pub authed_token: Option<String>,
 }
 
 pub trait Ch5ResponsesFormatter {
@@ -92,6 +93,7 @@ mod tests {
             body: body.to_owned(),
             thread_id: "1666666666".to_owned(),
             ip_addr: "1.1.1.1".to_owned(),
+            authed_token: None,
         }
     }
     #[test]

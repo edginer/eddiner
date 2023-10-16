@@ -17,7 +17,7 @@ pub trait Ch5ThreadFormatter {
     fn format_threads(&self) -> String;
 }
 
-const SUBJECT_TEMPLATE: &'static str = "
+const SUBJECT_TEMPLATE: &str = "
 {%- for thread in threads -%}
   {{ thread.thread_number }}.dat<>{{ thread.title | replace('\n', '') }} ({{ thread.response_count }})
 {% endfor -%}
