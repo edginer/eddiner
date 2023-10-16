@@ -30,10 +30,10 @@ pub(crate) mod board_config;
 mod turnstile;
 
 // TODO(kenmo-melon): 設定可能に? (コンパイル時定数? wrangler.toml?)
-const SITE_TITLE: &'static str = "edgebb";
-const SITE_NAME: &'static str = "エッヂ";
-const SITE_DESCRIPTION: &'static str = "掲示板";
-pub(crate) const BOARDS: &'static [BoardConfig] = &[BoardConfig {
+const SITE_TITLE: &str = "edgebb";
+const SITE_NAME: &str = "エッヂ";
+const SITE_DESCRIPTION: &str = "掲示板";
+pub(crate) const BOARDS: &[BoardConfig] = &[BoardConfig {
     board_id: 1,
     title: "なんでも実況エッヂ",
     board_key: "liveedge",
@@ -105,7 +105,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if check_webui_disabled(&env) {
                 return webui::webui_disabled(SITE_TITLE);
             }
-            webui::route_index(SITE_TITLE, SITE_NAME, SITE_DESCRIPTION, &BOARDS)
+            webui::route_index(SITE_TITLE, SITE_NAME, SITE_DESCRIPTION, BOARDS)
                 .map_err(|e| Error::RustError(format!("Error in index.rs {}", e)))
         }
         "/liveedge/" | "/liveedge" => {
@@ -185,7 +185,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             }
             let board_idx = e.find("/liveedge/").unwrap();
             let rest_url = &e[board_idx + "/liveedge/".len()..];
-            let slash_idx = if let Some(slash_idx) = rest_url.find("/") {
+            let slash_idx = if let Some(slash_idx) = rest_url.find('/') {
                 match &rest_url[slash_idx..] {
                     "/" | "/index.html" => slash_idx,
                     _ => return Response::error("Not found", 404),

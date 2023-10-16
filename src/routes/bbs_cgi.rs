@@ -184,7 +184,7 @@ impl<'a> BbsCgiRouter<'a> {
             Some(form) => form,
             None => return Err(Response::error("Bad request", 400)),
         };
-        let host_url = utils::get_host_url(&req)?;
+        let host_url = utils::get_host_url(req)?;
 
         if let Err(e) = form.validate() {
             return Err(response_shift_jis_text_html(
