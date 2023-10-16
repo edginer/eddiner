@@ -176,7 +176,6 @@ impl<'a> BbsCgiRouter<'a> {
                 }
             };
 
-        console_debug!("{:?}", ip_addr);
         let Ok(req_bytes) = req.bytes().await else {
             return Err(Response::error("Bad request", 400));
         };
