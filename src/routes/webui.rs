@@ -10,6 +10,12 @@ use worker::{D1Database, Response, Result};
 const BOARD_HTML: &str = include_str!("templates/board.html");
 const INDEX_HTML: &str = include_str!("templates/index.html");
 const THREAD_HTML: &str = include_str!("templates/thread.html");
+const WEBUI_DISABLED_HTML: &str = include_str!("templates/webui_disabled.html");
+
+pub(crate) fn webui_disabled(site_title: &str) -> Result<Response> {
+    let html = WEBUI_DISABLED_HTML.replace("{site_title}", site_title);
+    Response::from_html(html)
+}
 
 pub(crate) fn route_index(
     site_title: &str,

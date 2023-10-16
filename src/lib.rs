@@ -30,6 +30,9 @@ pub(crate) mod board_config;
 mod turnstile;
 
 // TODO(kenmo-melon): 設定可能に? (コンパイル時定数? wrangler.toml?)
+const SITE_TITLE: &'static str = "edgebb";
+const SITE_NAME: &'static str = "エッヂ";
+const SITE_DESCRIPTION: &'static str = "掲示板";
 pub(crate) const BOARDS: &'static [BoardConfig] = &[BoardConfig {
     board_id: 1,
     title: "なんでも実況エッヂ",
@@ -53,6 +56,14 @@ fn get_token_cookies(req: &Request) -> Option<String> {
         }
     }
     None
+}
+
+/// Returns true if --var=WEBUI:false is passed
+fn check_webui_disabled(env: &Env) -> bool {
+    match env.var("WEBUI") {
+        Ok(var) => var.to_string() == "false",
+        _ => false,
+    }
 }
 
 #[event(fetch)]
@@ -90,9 +101,17 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 Response::error("Bad request", 400)
             }
         }
-        "/" | "/index.html" => webui::route_index("edgebb", "えっぢ", "掲示板", &BOARDS)
-            .map_err(|e| Error::RustError(format!("Error in index.rs {}", e))),
+        "/" | "/index.html" => {
+            if check_webui_disabled(&env) {
+                return webui::webui_disabled(SITE_TITLE);
+            }
+            webui::route_index(SITE_TITLE, SITE_NAME, SITE_DESCRIPTION, &BOARDS)
+                .map_err(|e| Error::RustError(format!("Error in index.rs {}", e)))
+        }
         "/liveedge/" | "/liveedge" => {
+            if check_webui_disabled(&env) {
+                return webui::webui_disabled(SITE_TITLE);
+            }
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error - db", 500);
             };
@@ -159,6 +178,11 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             Ok(result)
         }
         e if e.starts_with("/liveedge/") || e.starts_with("/test/read.cgi/liveedge/") => {
+            // TODO(kenmo-melon): これだと/liveedge/hogehogeのようなURLにもアクセスできるが、
+            // DBにたくさんアクセスする羽目になるよりはマシ？
+            if check_webui_disabled(&env) {
+                return webui::webui_disabled(SITE_TITLE);
+            }
             let board_idx = e.find("/liveedge/").unwrap();
             let rest_url = &e[board_idx + "/liveedge/".len()..];
             let slash_idx = if let Some(slash_idx) = rest_url.find("/") {
