@@ -4,7 +4,7 @@ use pwhash::unix;
 use sha1::Sha1;
 use worker::*;
 
-use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip};
+use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip, n_recent_auth};
 use crate::{
     authed_cookie::AuthedCookie,
     thread::Thread,
@@ -23,6 +23,8 @@ const REQUEST_AUTHENTICATION_CODE_HTML: &str =
     include_str!("templates/request_authentication_code.html");
 const REQUEST_AUTHENTICATION_LOCAL: &str =
     include_str!("templates/request_authentication_local.html");
+
+const N_MAX_RECENT_AUTH_PER_IP: u32 = 3;
 
 #[derive(Debug, Clone)]
 struct BbsCgiForm {
@@ -247,6 +249,15 @@ impl<'a> BbsCgiRouter<'a> {
         };
 
         let Some(authenticated_user_cookie) = authenticated_user_cookie else {
+            // If the user is trying to get authed cookie too many times, it might be a script.
+            // Even if not, it may be better to reject such access to reduce write access to db.
+            let n_r_auth = n_recent_auth(&self.ip_addr)?;
+            if n_r_auth >= N_MAX_RECENT_AUTH_PER_IP {
+                return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
+                    "{reason}",
+                    "発行ずみの認証トークンを使うか、時間を置いて再度アクセスして下さい",
+                ));
+            }
             let mut hasher: Md5 = Md5::new();
             hasher.update(&self.ip_addr);
             hasher.update(&self.unix_time.to_string());
