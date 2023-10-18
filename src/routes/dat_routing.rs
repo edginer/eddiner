@@ -47,7 +47,7 @@ pub async fn route_dat(
             };
 
             let log_text = log_body.text().await?;
-            response_shift_jis_text_plain_with_cache(log_text)
+            response_shift_jis_text_plain_with_cache(log_text, 86400)
         } else {
             Response::error("Not found - dat", 404)
         };
@@ -101,9 +101,15 @@ pub async fn route_dat(
 
                 response_shift_jis_with_range(body, start).map(|x| x.with_status(206))
             } else {
-                response_shift_jis_text_plain_with_cache(body)
+                response_shift_jis_text_plain_with_cache(
+                    body,
+                    if thread.active == 0 { 86400 } else { 1 },
+                )
             }
         }
-        _ => response_shift_jis_text_plain_with_cache(body),
+        _ => response_shift_jis_text_plain_with_cache(
+            body,
+            if thread.active == 0 { 86400 } else { 1 },
+        ),
     }
 }

@@ -112,6 +112,10 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             route_bbs_cgi(&mut req, &env, ua, &db, token_cookie.as_deref()).await
         }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
+
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
@@ -119,10 +123,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             let range = req.headers().get("Range").ok().flatten();
             let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
-
-            if let Ok(Some(s)) = cache.get(&req, false).await {
-                return Ok(s);
-            }
 
             let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned))
             else {
