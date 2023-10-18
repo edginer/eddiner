@@ -12,6 +12,7 @@ pub struct Res {
     pub thread_id: String,
     pub ip_addr: String,
     pub authed_token: Option<String>,
+    pub timestamp: u64,
 }
 
 pub trait Ch5ResponsesFormatter {
