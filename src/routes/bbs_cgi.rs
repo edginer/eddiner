@@ -308,7 +308,10 @@ impl<'a> BbsCgiRouter<'a> {
                 WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
             );
         }
-        let min_recent_res_span = match self.get_min_recent_res_span().await {
+        let min_recent_res_span = match self
+            .get_min_recent_res_span(&authenticated_user_cookie.cookie)
+            .await
+        {
             Ok(min_recent_res_span) => min_recent_res_span,
             Err(e) => return Response::error(e, 500),
         };
@@ -317,6 +320,7 @@ impl<'a> BbsCgiRouter<'a> {
                 WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
             );
         }
+
         let mut hasher = Md5::new();
         hasher.update(&authenticated_user_cookie.clone().cookie);
         let datetime = get_current_date_time();
@@ -327,9 +331,10 @@ impl<'a> BbsCgiRouter<'a> {
         self.id = Some(id);
 
         let result = if self.form.is_thread {
-            self.create_thread().await
+            self.create_thread(&authenticated_user_cookie.cookie).await
         } else {
-            self.create_response().await
+            self.create_response(&authenticated_user_cookie.cookie)
+                .await
         };
         if is_cap {
             let tk = authenticated_user_cookie.cookie;
@@ -348,17 +353,21 @@ impl<'a> BbsCgiRouter<'a> {
     }
 
     /// Returns the number of recent responses per second for this token.
-    async fn get_min_recent_res_span(&self) -> std::result::Result<u64, &'static str> {
+    async fn get_min_recent_res_span(
+        &self,
+        cookie: &str,
+    ) -> std::result::Result<u64, &'static str> {
         let Ok(stmt) = self
             .db
             .prepare("SELECT * FROM responses WHERE authed_token = ? AND timestamp > ?")
             .bind(&[
-                self.token_cookie.unwrap().into(),
+                cookie.into(),
                 (self.unix_time - RECENT_RES_SECONDS).to_string().into(),
             ])
         else {
             return Err("internal server error - auth bind");
         };
+
         let Ok(responses) = stmt.all().await.and_then(|res| res.results::<Res>()) else {
             return Err("internal server error - auth bind");
         };
@@ -398,7 +407,7 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(thread_info)
     }
 
-    async fn create_thread(self) -> Result<Response> {
+    async fn create_thread(self, cookie: &str) -> Result<Response> {
         let BbsCgiForm {
             subject,
             name,
@@ -420,7 +429,7 @@ impl<'a> BbsCgiRouter<'a> {
             body.into(),
             self.unix_time.to_string().into(),
             self.ip_addr.into(),
-            self.token_cookie.unwrap().into(),
+            cookie.into(),
             self.unix_time.to_string().into(),
         ]);
 
@@ -447,7 +456,7 @@ impl<'a> BbsCgiRouter<'a> {
         }
     }
 
-    async fn create_response(self) -> Result<Response> {
+    async fn create_response(self, cookie: &str) -> Result<Response> {
         let BbsCgiForm {
             name,
             mail,
@@ -501,7 +510,7 @@ impl<'a> BbsCgiRouter<'a> {
             body.into(),
             thread_id.into(),
             self.ip_addr.into(),
-            self.token_cookie.unwrap().into(),
+            cookie.into(),
             self.unix_time.to_string().into(),
         ]);
         if response.is_err() {
