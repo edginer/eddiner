@@ -112,6 +112,11 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if check_webui_disabled(&env) {
                 return webui::webui_disabled(SITE_TITLE);
             }
+
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
+
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error - db", 500);
             };
@@ -119,7 +124,14 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 Ok(url) => url,
                 Err(res) => return res,
             };
-            webui::route_board(&host_url, &BOARDS[0], &db).await
+            let mut resp = webui::route_board(&host_url, &BOARDS[0], &db).await?;
+            if let Ok(result) = resp.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+
+            Ok(resp)
         }
         "/liveedge/SETTING.TXT" => routes::setting_txt::route_setting_txt(),
         "/liveedge/subject.txt" => {
@@ -185,6 +197,14 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if check_webui_disabled(&env) {
                 return webui::webui_disabled(SITE_TITLE);
             }
+
+            let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned))
+            else {
+                return Response::error("internal server error - failed to parse url", 500);
+            };
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
             let board_idx = e.find("/liveedge/").unwrap();
             let rest_url = &e[board_idx + "/liveedge/".len()..];
             let slash_idx = if let Some(slash_idx) = rest_url.find('/') {
@@ -201,7 +221,13 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
-            webui::route_thread(thread_id, &BOARDS[0], &db).await
+            let mut resp = webui::route_thread(thread_id, &BOARDS[0], &db, &host_url).await?;
+            if let Ok(result) = resp.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+            Ok(resp)
         }
         _ => Response::error(format!("Not found - other route {}", req.path()), 404),
     }
