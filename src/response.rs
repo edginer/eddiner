@@ -31,19 +31,20 @@ const DAT_TEMPLATE: &str = "
 {% endfor %}
 ";
 
-struct TokenRemover {
+pub(crate) struct TokenRemover {
     regex: Regex,
     default: String,
 }
 
 impl TokenRemover {
-    fn new(default: &str) -> TokenRemover {
+    pub(crate) fn new(default: &str) -> TokenRemover {
         TokenRemover {
             regex: Regex::new(r"[a-z0-9]{30,}?").unwrap(),
             default: default.to_owned(),
         }
     }
-    fn remove(&self, name: String) -> String {
+
+    pub(crate) fn remove(&self, name: String) -> String {
         if name.starts_with('#') || (name.len() >= 30 && self.regex.is_match(&name)) {
             self.default.clone()
         } else {

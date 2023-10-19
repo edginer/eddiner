@@ -2,11 +2,23 @@ use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
 use rand::Rng;
-use worker::{Date, Response};
+use worker::{Date, Error, Request, Response};
 
-pub fn shift_jis_url_encodeded_body_to_vec(
-    data: &str,
-) -> std::result::Result<HashMap<&str, String>, ()> {
+pub fn get_host_url(req: &Request) -> Result<String, worker::Result<Response>> {
+    let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned)) else {
+        return Err(Response::error(
+            "internal server error - failed to parse url",
+            500,
+        ));
+    };
+    Ok(host_url)
+}
+
+pub fn into_workers_err<E: std::fmt::Display>(e: E) -> Error {
+    Error::RustError(format!("{}", e))
+}
+
+pub fn shift_jis_url_encodeded_body_to_vec(data: &str) -> Result<HashMap<&str, String>, ()> {
     fn ascii_hex_digit_to_byte(value: u8) -> Result<u8, ()> {
         if value.is_ascii_hexdigit() {
             if value.is_ascii_digit() {

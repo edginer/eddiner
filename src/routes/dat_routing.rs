@@ -6,6 +6,26 @@ use crate::{
     utils::{response_shift_jis_text_plain_with_cache, response_shift_jis_with_range},
 };
 
+pub(crate) async fn get_all_responses(
+    thread_id: &str,
+    db: &D1Database,
+) -> std::result::Result<Vec<Res>, Result<Response>> {
+    let Ok(responses_binded_stmt) = db
+        .prepare("SELECT * FROM responses WHERE thread_id = ?")
+        .bind(&[thread_id.into()])
+    else {
+        return Err(Response::error("internal server error", 500));
+    };
+    let Ok(responses) = responses_binded_stmt
+        .all()
+        .await
+        .and_then(|res| res.results::<Res>())
+    else {
+        return Err(Response::error("internal server error", 500));
+    };
+    Ok(responses)
+}
+
 pub async fn route_dat(
     path: &str,
     ua: &Option<String>,
@@ -25,13 +45,15 @@ pub async fn route_dat(
 
     let Ok(binded_stmt) = db
         .prepare("SELECT * FROM threads WHERE thread_number = ?")
-        .bind(&[thread_id.to_string().into()])
+        .bind(&[thread_id.clone().into()])
     else {
         return Response::error("internal server error", 500);
     };
-    let Ok(thread) = binded_stmt.first::<Thread>(None).await else {
-        return Response::error("internal server error", 500);
+    let thread = match binded_stmt.first::<Thread>(None).await {
+        Ok(t) => t,
+        Err(e) => return Response::error(format!("internal server error -db {e}"), 500),
     };
+
     let Some(thread) = thread else {
         return if let Some(bucket) = bucket {
             let log = bucket
@@ -67,17 +89,9 @@ pub async fn route_dat(
         }
     }
 
-    let Ok(responses_binded_stmt) = db
-        .prepare("SELECT * FROM responses WHERE thread_id = ?")
-        .bind(&[thread_id.into()])
-    else {
-        return Response::error("internal server error", 500);
-    };
-    let Ok(responses) = responses_binded_stmt.all().await else {
-        return Response::error("internal server error", 500);
-    };
-    let Ok(mut responses): Result<Vec<Res>> = responses.results::<Res>() else {
-        return Response::error("internal server error", 500);
+    let mut responses = match get_all_responses(&thread_id, db).await {
+        Ok(responses) => responses,
+        Err(e) => return e,
     };
 
     if host.contains("workers.dev") {
