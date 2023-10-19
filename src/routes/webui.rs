@@ -38,6 +38,11 @@ pub(crate) async fn route_board(
     board: &BoardConfig,
     db: &D1Database,
 ) -> Result<Response> {
+    // TODO: this restriction is only for eddi. It should be removed in the future.
+    if host_url.contains("workers.dev") {
+        return webui_disabled("edgebb");
+    }
+
     // Get threads from db
     let Ok(stmt) = db
         .prepare("SELECT * FROM threads WHERE active = 1 AND board_id = ?")
@@ -56,14 +61,23 @@ pub(crate) async fn route_board(
     let html = tmpl
         .render(context!(host_url, board, threads))
         .map_err(into_workers_err)?;
-    Response::from_html(html)
+    Response::from_html(html).map(|mut x| {
+        let _ = x.headers_mut().append("Cache-Control", "s-maxage=10");
+        x
+    })
 }
 
 pub(crate) async fn route_thread(
     thread_id: u64,
     board: &BoardConfig,
     db: &D1Database,
+    host_url: &str,
 ) -> Result<Response> {
+    // TODO: this restriction is only for eddi. It should be removed in the future.
+    if host_url.contains("workers.dev") {
+        return webui_disabled("edgebb");
+    }
+
     // Get threads from db
     let thread_id = thread_id.to_string();
     let Ok(stmt) = db
@@ -91,5 +105,8 @@ pub(crate) async fn route_thread(
     let html = tmpl
         .render(context!(board, thread, responses))
         .map_err(into_workers_err)?;
-    Response::from_html(html)
+    Response::from_html(html).map(|mut x| {
+        let _ = x.headers_mut().append("Cache-Control", "s-maxage=5");
+        x
+    })
 }
