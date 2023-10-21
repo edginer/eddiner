@@ -7,6 +7,7 @@ use worker::*;
 use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip, n_recent_auth};
 use crate::{
     authed_cookie::AuthedCookie,
+    response::Res,
     thread::Thread,
     utils::{
         self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
@@ -24,6 +25,7 @@ const REQUEST_AUTHENTICATION_CODE_HTML: &str =
 const REQUEST_AUTHENTICATION_LOCAL: &str =
     include_str!("templates/request_authentication_local.html");
 
+const RECENT_RES_SECONDS: u64 = 40;
 const N_MAX_RECENT_AUTH_PER_IP: u32 = 3;
 
 #[derive(Debug, Clone)]
@@ -316,21 +318,17 @@ impl<'a> BbsCgiRouter<'a> {
                 WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
             );
         }
-
-        if let Some(s) = &authenticated_user_cookie.last_wrote_time {
-            if self.unix_time - s.parse::<u64>().unwrap() < 5 {
-                return response_shift_jis_text_html(
-                    WRITING_FAILED_HTML_RESPONSE
-                        .replace("{reason}", "5秒以内の連続投稿はできません"),
-                );
-            }
-        }
-
-        if let Err(e) = self
-            .update_last_wrote_time(&authenticated_user_cookie)
+        let min_recent_res_span = match self
+            .get_min_recent_res_span(&authenticated_user_cookie.cookie)
             .await
         {
-            return Response::error(e, 500);
+            Ok(min_recent_res_span) => min_recent_res_span,
+            Err(e) => return Response::error(e, 500),
+        };
+        if min_recent_res_span < 5 {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
+            );
         }
 
         let mut hasher = Md5::new();
@@ -343,11 +341,11 @@ impl<'a> BbsCgiRouter<'a> {
         self.id = Some(id);
 
         let result = if self.form.is_thread {
-            self.create_thread().await
+            self.create_thread(&authenticated_user_cookie.cookie).await
         } else {
-            self.create_response().await
+            self.create_response(&authenticated_user_cookie.cookie)
+                .await
         };
-
         if is_cap {
             let tk = authenticated_user_cookie.cookie;
             result.map(|mut x| {
@@ -364,25 +362,41 @@ impl<'a> BbsCgiRouter<'a> {
         }
     }
 
-    async fn update_last_wrote_time(
+    /// Returns the number of recent responses per second for this token.
+    async fn get_min_recent_res_span(
         &self,
-        cookie: &AuthedCookie,
-    ) -> std::result::Result<(), &'static str> {
+        cookie: &str,
+    ) -> std::result::Result<u64, &'static str> {
         let Ok(stmt) = self
             .db
-            .prepare("UPDATE authed_cookies SET last_wrote_time = ? WHERE cookie = ?")
+            .prepare("SELECT * FROM responses WHERE authed_token = ? AND timestamp > ?")
             .bind(&[
-                self.unix_time.to_string().into(),
-                cookie.cookie.clone().into(),
+                cookie.into(),
+                (self.unix_time - RECENT_RES_SECONDS).to_string().into(),
             ])
         else {
             return Err("internal server error - auth bind");
         };
-        if stmt.run().await.is_err() {
-            return Err("internal server error - db");
-        }
 
-        Ok(())
+        let Ok(responses) = stmt.all().await.and_then(|res| res.results::<Res>()) else {
+            return Err("internal server error - auth bind");
+        };
+        if responses.len() == 0 {
+            return Ok(u64::max_value());
+        }
+        let mut time_stamps = responses
+            .iter()
+            .map(|res| res.timestamp)
+            .collect::<Vec<_>>();
+        time_stamps.push(self.unix_time);
+        time_stamps.sort();
+        let ts_min = time_stamps
+            .iter()
+            .zip(time_stamps.iter().skip(1))
+            .map(|(&ts_i, &ts_i1)| ts_i1 - ts_i)
+            .min()
+            .unwrap();
+        Ok(ts_min)
     }
 
     async fn get_thread(
@@ -403,7 +417,7 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(thread_info)
     }
 
-    async fn create_thread(self) -> Result<Response> {
+    async fn create_thread(self, cookie: &str) -> Result<Response> {
         let BbsCgiForm {
             subject,
             name,
@@ -417,7 +431,7 @@ impl<'a> BbsCgiRouter<'a> {
         ).bind(&[self.unix_time.to_string().into(), subject.clone().unwrap().into(), self.unix_time.to_string().into()]);
 
         let response = self.db.prepare(
-            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(&[name.into(),
             mail.into(),
             get_current_date_time_string().into(),
@@ -425,7 +439,8 @@ impl<'a> BbsCgiRouter<'a> {
             body.into(),
             self.unix_time.to_string().into(),
             self.ip_addr.into(),
-            self.token_cookie.unwrap().into(),
+            cookie.into(),
+            self.unix_time.to_string().into(),
         ]);
 
         match (thread, response) {
@@ -451,7 +466,7 @@ impl<'a> BbsCgiRouter<'a> {
         }
     }
 
-    async fn create_response(self) -> Result<Response> {
+    async fn create_response(self, cookie: &str) -> Result<Response> {
         let BbsCgiForm {
             name,
             mail,
@@ -496,7 +511,7 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         let response = self.db.prepare(
-            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(&[
             name.into(),
             mail.into(),
@@ -505,7 +520,8 @@ impl<'a> BbsCgiRouter<'a> {
             body.into(),
             thread_id.into(),
             self.ip_addr.into(),
-            self.token_cookie.unwrap().into(),
+            cookie.into(),
+            self.unix_time.to_string().into(),
         ]);
         if response.is_err() {
             return Response::error("Bad request - response.is_err()", 400);
@@ -513,8 +529,11 @@ impl<'a> BbsCgiRouter<'a> {
 
         match (update_thread_stmt, response) {
             (Ok(thread), Ok(response)) => {
-                if self.db.batch(vec![thread, response]).await.is_err() {
-                    Response::error("internal server error - thread creation batch", 500)
+                if let Err(e) = self.db.batch(vec![thread, response]).await {
+                    Response::error(
+                        format!("internal server error - thread creation batch {}", e),
+                        500,
+                    )
                 } else {
                     response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string())
                 }
