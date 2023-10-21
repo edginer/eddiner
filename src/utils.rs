@@ -87,9 +87,25 @@ pub fn response_shift_jis_text_plain(body: String) -> worker::Result<Response> {
     Ok(resp)
 }
 
-pub fn response_shift_jis_text_plain_with_cache(body: String) -> worker::Result<Response> {
+pub fn response_shift_jis_text_plain_with_cache(
+    body: String,
+    ttl: usize,
+) -> worker::Result<Response> {
     let mut resp = response_shift_jis_text_plain(body)?;
-    let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
+
+    match ttl {
+        1 => {
+            let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
+        }
+        86400 => {
+            let _ = resp.headers_mut().append("Cache-Control", "s-maxage=86400");
+        }
+        s => {
+            let max_age = format!("s-maxage={}", s);
+            let _ = resp.headers_mut().append("Cache-Control", max_age.as_str());
+        }
+    }
+
     Ok(resp)
 }
 
@@ -101,6 +117,7 @@ pub fn response_shift_jis_with_range(body: String, start_range: usize) -> worker
     };
     let _ = resp.headers_mut().delete("Content-Type");
     let _ = resp.headers_mut().append("Content-Type", "text/plain");
+    // NOTE: In Cloudflare Cache API, this header is nonsense because range request is not cached.
     let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
     Ok(resp)
 }

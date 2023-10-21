@@ -106,13 +106,13 @@ window.addEventListener("load", () => {
         if (xhr.responseText.startsWith("<html><!-- 2ch_X:error -->")) {
           const parser = new DOMParser();
           const htmlDoc = parser.parseFromString(xhr.responseText, "text/html");
-          window.alert(htmlDoc.body.firstChild.textContent);
+          window.alert(htmlDoc.body.textContent);
         } else if (window.confirm("書きこみに成功しました。ページを更新しますか？")) {
           window.location.reload();
         };
       }
       if (xhr.readyState === XMLHttpRequest.DONE && xhr.status !== 200) {
-        window.alert("書きこみに失敗しました。");
+        window.alert(`書きこみに失敗しました。${xhr.responseText}`);
       }
     };
     xhr.send(urlEncodedData);

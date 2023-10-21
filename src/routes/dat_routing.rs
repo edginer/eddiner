@@ -32,6 +32,7 @@ pub async fn route_dat(
     range: Option<String>,
     if_modified_since: Option<String>,
     db: &D1Database,
+    bucket: &Option<Bucket>,
     host: String,
 ) -> Result<Response> {
     let thread_id = path.replace(".dat", "").replace("/liveedge/dat/", "");
@@ -49,9 +50,29 @@ pub async fn route_dat(
         return Response::error("internal server error", 500);
     };
     let thread = match binded_stmt.first::<Thread>(None).await {
-        Ok(Some(thread)) => thread,
-        Ok(None) => return Response::error("internal server error", 500),
-        Err(e) => return Response::error(format!("DB error {}", e), 500),
+        Ok(t) => t,
+        Err(e) => return Response::error(format!("internal server error -db {e}"), 500),
+    };
+
+    let Some(thread) = thread else {
+        return if let Some(bucket) = bucket {
+            let log = bucket
+                .get(format!("liveedge/dat/{thread_id}.dat"))
+                .execute()
+                .await?;
+
+            let Some(log) = log else {
+                return Response::error("Not found - dat", 404);
+            };
+            let Some(log_body) = log.body() else {
+                return Response::error("Internal server error - dat bucket", 500);
+            };
+
+            let log_text = log_body.text().await?;
+            response_shift_jis_text_plain_with_cache(log_text, 86400)
+        } else {
+            Response::error("Not found - dat", 404)
+        };
     };
     if let Some(if_modified_since) = if_modified_since {
         if let Ok(parsed_date_time) =
@@ -94,9 +115,15 @@ pub async fn route_dat(
 
                 response_shift_jis_with_range(body, start).map(|x| x.with_status(206))
             } else {
-                response_shift_jis_text_plain_with_cache(body)
+                response_shift_jis_text_plain_with_cache(
+                    body,
+                    if thread.active == 0 { 86400 } else { 1 },
+                )
             }
         }
-        _ => response_shift_jis_text_plain_with_cache(body),
+        _ => response_shift_jis_text_plain_with_cache(
+            body,
+            if thread.active == 0 { 86400 } else { 1 },
+        ),
     }
 }
