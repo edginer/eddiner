@@ -112,7 +112,7 @@ window.addEventListener("load", () => {
         };
       }
       if (xhr.readyState === XMLHttpRequest.DONE && xhr.status !== 200) {
-        window.alert("書きこみに失敗しました。");
+        window.alert(`書きこみに失敗しました。${xhr.responseText}`);
       }
     };
     xhr.send(urlEncodedData);
