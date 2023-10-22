@@ -331,6 +331,14 @@ impl<'a> BbsCgiRouter<'a> {
             );
         }
 
+        if let Some(s) = &authenticated_user_cookie.last_thread_creation {
+            if self.form.is_thread && self.unix_time - s.parse::<u64>().unwrap() < 120 {
+                return response_shift_jis_text_html(
+                    WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "ちょっとスレ立てすぎ！"),
+                );
+            }
+        }
+
         let mut hasher = Md5::new();
         hasher.update(&authenticated_user_cookie.clone().cookie);
         let datetime = get_current_date_time();
@@ -417,6 +425,24 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(thread_info)
     }
 
+    async fn update_last_thread_creation(
+        &self,
+        cookie: &str,
+    ) -> std::result::Result<(), &'static str> {
+        let Ok(stmt) = self
+            .db
+            .prepare("UPDATE authed_cookies SET last_thread_creation = ? WHERE cookie = ?")
+            .bind(&[self.unix_time.to_string().into(), cookie.into()])
+        else {
+            return Err("internal server error - auth bind");
+        };
+        if stmt.run().await.is_err() {
+            return Err("internal server error - db");
+        }
+
+        Ok(())
+    }
+
     async fn create_thread(self, cookie: &str) -> Result<Response> {
         let BbsCgiForm {
             subject,
@@ -427,21 +453,22 @@ impl<'a> BbsCgiRouter<'a> {
         } = &self.form;
 
         let thread = self.db.prepare(
-            "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified) VALUES (?, ?, 1, 1, ?)",
-        ).bind(&[self.unix_time.to_string().into(), subject.clone().unwrap().into(), self.unix_time.to_string().into()]);
+            "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified, authed_cookie) VALUES (?, ?, 1, 1, ?, ?)",
+        ).bind(&[self.unix_time.to_string().into(), subject.clone().unwrap().into(), self.unix_time.to_string().into(), cookie.into()]);
 
         let response = self.db.prepare(
             "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(&[name.into(),
             mail.into(),
             get_current_date_time_string().into(),
-            self.id.unwrap().into(),
+            self.id.clone().unwrap().into(),
             body.into(),
             self.unix_time.to_string().into(),
-            self.ip_addr.into(),
+            self.ip_addr.clone().into(),
             cookie.into(),
             self.unix_time.to_string().into(),
         ]);
+        self.update_last_thread_creation(cookie).await?;
 
         match (thread, response) {
             (Ok(thread), Ok(response)) => {

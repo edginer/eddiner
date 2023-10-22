@@ -56,6 +56,7 @@ fn generate_responses() -> Vec<Res> {
             thread_id: "1666666666".to_owned(),
             ip_addr: "1.1.1.1".to_owned(),
             authed_token: None,
+            timestamp: 0,
         };
         responses.push(res);
     }

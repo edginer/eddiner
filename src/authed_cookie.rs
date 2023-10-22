@@ -9,5 +9,5 @@ pub struct AuthedCookie {
     pub authed: i32,
     pub writed_time: String,
     pub auth_code: String,
-    pub last_wrote_time: Option<String>,
+    pub last_thread_creation: Option<String>,
 }
