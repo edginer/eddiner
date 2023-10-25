@@ -22,7 +22,8 @@ CREATE TABLE responses (
     author_id TEXT,
     body TEXT NOT NULL,
     thread_id TEXT NOT NULL,
-    ip_addr TEXT NOT NULL
+    ip_addr TEXT NOT NULL,
+    authed_token TEXT
 );
 
 CREATE TABLE boards (
@@ -39,6 +40,14 @@ CREATE TABLE authed_cookies (
     writed_time TEXT,
     auth_code TEXT,
     last_wrote_time TEXT
+);
+
+CREATE TABLE archives (
+    thread_number TEXT NOT NULL,
+    title TEXT NOT NULL,
+    response_count INTEGER NOT NULL,
+    board_id INTEGER NOT NULL,
+    last_modified TEXT NOT NULL
 );
 
 INSERT INTO boards (name) VALUES ('なんでも実況エッヂ');
@@ -59,5 +68,7 @@ INSERT INTO responses (
 CREATE INDEX authed_cookies_cookie_idx ON authed_cookies(cookie);
 CREATE INDEX authed_cookies_origin_ip ON authed_cookies(origin_ip);
 
-CREATE INDEX threads_thread_number_idx ON threads(thread_number);
+CREATE UNIQUE INDEX threads_thread_number_idx ON threads(thread_number);
 CREATE INDEX responses_thread_number_idx ON responses(thread_id);
+
+CREATE INDEX archives_thread_number_idx ON archives (thread_number);
