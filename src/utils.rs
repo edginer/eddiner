@@ -139,10 +139,30 @@ pub fn get_current_date_time() -> chrono::NaiveDateTime {
     date.checked_add_signed(chrono::Duration::hours(9)).unwrap()
 }
 
-pub fn get_current_date_time_string() -> String {
-    get_current_date_time()
-        .format("%Y/%m/%d(%a) %H:%M:%S.%3f")
-        .to_string()
+pub fn get_current_date_time_string(is_ja: bool) -> String {
+    if is_ja {
+        let en_dt = get_current_date_time()
+            .format("%Y/%m/%d(%a) %H:%M:%S.%3f")
+            .to_string();
+        convert_weekday_to_ja(&en_dt).to_string()
+    } else {
+        get_current_date_time()
+            .format("%Y/%m/%d(%a) %H:%M:%S.%3f")
+            .to_string()
+    }
+}
+
+fn convert_weekday_to_ja(weekday: &str) -> &str {
+    match weekday {
+        "Mon" => "月",
+        "Tue" => "火",
+        "Wed" => "水",
+        "Thu" => "木",
+        "Fri" => "金",
+        "Sat" => "土",
+        "Sun" => "日",
+        x => x,
+    }
 }
 
 fn unix_ts_to_bytes(ts: u64) -> [u8; 32] {
