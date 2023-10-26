@@ -339,12 +339,15 @@ impl<'a> BbsCgiRouter<'a> {
             }
         }
 
-        let mut hasher = Md5::new();
-        hasher.update(&authenticated_user_cookie.clone().cookie);
         let datetime = get_current_date_time();
-        hasher.update(datetime.date().to_string());
-        let hash = hasher.finalize();
-        let id = format!("{:x}", hash).chars().take(10).collect::<String>();
+        let id = calculate_trip(&format!(
+            "{}:{}",
+            authenticated_user_cookie.clone().origin_ip,
+            datetime.date(),
+        ))
+        .chars()
+        .take(9)
+        .collect::<String>();
 
         self.id = Some(id);
 
@@ -389,7 +392,7 @@ impl<'a> BbsCgiRouter<'a> {
         let Ok(responses) = stmt.all().await.and_then(|res| res.results::<Res>()) else {
             return Err("internal server error - auth bind");
         };
-        if responses.len() == 0 {
+        if responses.is_empty() {
             return Ok(u64::max_value());
         }
         let mut time_stamps = responses
@@ -460,7 +463,7 @@ impl<'a> BbsCgiRouter<'a> {
             "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(&[name.into(),
             mail.into(),
-            get_current_date_time_string().into(),
+            get_current_date_time_string(true).into(),
             self.id.clone().unwrap().into(),
             body.into(),
             self.unix_time.to_string().into(),
@@ -542,7 +545,7 @@ impl<'a> BbsCgiRouter<'a> {
         ).bind(&[
             name.into(),
             mail.into(),
-            get_current_date_time_string().into(),
+            get_current_date_time_string(true).into(),
             self.id.unwrap().into(),
             body.into(),
             thread_id.into(),
