@@ -1,8 +1,7 @@
-use crate::board_config::BoardConfig;
 use crate::response::TokenRemover;
-use crate::routes::dat_routing;
 use crate::thread::Thread;
 use crate::utils::into_workers_err;
+use crate::{board_config::BoardConfig, repositories::bbs_repository::BbsRepository};
 
 use minijinja::{context, Environment};
 use worker::{D1Database, Response, Result};
@@ -73,6 +72,8 @@ pub(crate) async fn route_thread(
     db: &D1Database,
     host_url: &str,
 ) -> Result<Response> {
+    let repo = BbsRepository::new(db);
+
     // TODO: this restriction is only for eddi. It should be removed in the future.
     if host_url.contains("workers.dev") {
         return webui_disabled("edgebb");
@@ -91,9 +92,9 @@ pub(crate) async fn route_thread(
         Ok(None) => return Response::error("internal server error", 500),
         Err(e) => return Response::error(format!("DB error {}", e), 500),
     };
-    let responses = match dat_routing::get_all_responses(&thread_id, db).await {
+    let responses = match repo.get_responses(1, &thread_id).await {
         Ok(responses) => responses,
-        Err(e) => return e,
+        Err(e) => return Response::error(format!("DB error {}", e), 500),
     };
 
     let mut env = Environment::new();

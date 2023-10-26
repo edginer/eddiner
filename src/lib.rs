@@ -1,5 +1,6 @@
 use board_config::BoardConfig;
 use cookie::Cookie;
+use repositories::bbs_repository::BbsRepository;
 use routes::{
     auth::{route_auth_get, route_auth_post},
     auth_code::{route_auth_code_get, route_auth_code_post},
@@ -144,7 +145,8 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
-            let mut result = route_subject_txt(&db).await?;
+            let repo = BbsRepository::new(&db);
+            let mut result = route_subject_txt(&repo).await?;
 
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
@@ -163,7 +165,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error - db", 500);
             };
-            let repo = repositories::bbs_repository::BbsRepository::new(&db);
+            let repo = BbsRepository::new(&db);
             route_bbs_cgi(&mut req, &env, ua, &repo, token_cookie.as_deref()).await
         }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
@@ -183,8 +185,10 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             else {
                 return Response::error("internal server error - failed to parse url", 500);
             };
+            let repo = BbsRepository::new(&db);
+
             let mut result =
-                route_dat(e, &ua, range, if_modified_since, &db, &bucket, host_url).await?;
+                route_dat(e, &ua, range, if_modified_since, &repo, &bucket, host_url).await?;
 
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {

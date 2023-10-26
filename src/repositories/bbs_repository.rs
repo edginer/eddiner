@@ -32,7 +32,7 @@ impl BbsRepository<'_> {
         Ok(thread)
     }
 
-    async fn get_threads(
+    pub async fn get_threads(
         &self,
         board_id: usize,
         status: ThreadStatus,
@@ -66,7 +66,11 @@ impl BbsRepository<'_> {
         Ok(threads)
     }
 
-    async fn get_responses(&self, board_id: usize, thread_id: &str) -> anyhow::Result<Vec<Res>> {
+    pub async fn get_responses(
+        &self,
+        board_id: usize,
+        thread_id: &str,
+    ) -> anyhow::Result<Vec<Res>> {
         let Ok(stmt) = self
             .db
             .prepare("SELECT * FROM responses WHERE thread_id = ? AND board_id = ?")
@@ -265,6 +269,7 @@ impl BbsRepository<'_> {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // TODO: Remove this
 pub enum ThreadStatus {
     // Show in the thread list
     Active,
