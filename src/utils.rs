@@ -141,10 +141,12 @@ pub fn get_current_date_time() -> chrono::NaiveDateTime {
 
 pub fn get_current_date_time_string(is_ja: bool) -> String {
     if is_ja {
-        let en_dt = get_current_date_time()
-            .format("%Y/%m/%d(%a) %H:%M:%S.%3f")
-            .to_string();
-        convert_weekday_to_ja(&en_dt).to_string()
+        let dt = get_current_date_time();
+        let dt_str = dt.format("%Y/%m/%d({weekday}) %H:%M:%S.%3f").to_string();
+        let en_weekday = dt.format("%a").to_string();
+        let weekday = convert_weekday_to_ja(&en_weekday);
+
+        dt_str.replace("{weekday}", weekday)
     } else {
         get_current_date_time()
             .format("%Y/%m/%d(%a) %H:%M:%S.%3f")

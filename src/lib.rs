@@ -28,6 +28,9 @@ pub(crate) mod routes {
 }
 pub(crate) mod board_config;
 mod turnstile;
+pub(crate) mod repositories {
+    pub(crate) mod bbs_repository;
+}
 
 // TODO(kenmo-melon): 設定可能に? (コンパイル時定数? wrangler.toml?)
 const SITE_TITLE: &str = "edgebb";
@@ -160,8 +163,8 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error - db", 500);
             };
-
-            route_bbs_cgi(&mut req, &env, ua, &db, token_cookie.as_deref()).await
+            let repo = repositories::bbs_repository::BbsRepository::new(&db);
+            route_bbs_cgi(&mut req, &env, ua, &repo, token_cookie.as_deref()).await
         }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
             if let Ok(Some(s)) = cache.get(&req, false).await {

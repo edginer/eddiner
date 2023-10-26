@@ -5,14 +5,12 @@ use sha1::Sha1;
 use worker::*;
 
 use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip, n_recent_auth};
-use crate::{
-    authed_cookie::AuthedCookie,
-    response::Res,
-    thread::Thread,
-    utils::{
-        self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
-        get_unix_timetamp_sec, response_shift_jis_text_html,
-    },
+use crate::repositories::bbs_repository::{
+    BbsRepository, CreatingAuthedToken, CreatingRes, CreatingThread,
+};
+use crate::utils::{
+    self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
+    get_unix_timetamp_sec, response_shift_jis_text_html,
 };
 
 const WRITING_SUCCESS_HTML_RESPONSE: &str =
@@ -134,10 +132,10 @@ pub async fn route_bbs_cgi(
     req: &mut Request,
     env: &Env,
     ua: Option<String>,
-    db: &D1Database,
+    repo: &BbsRepository<'_>,
     token_cookie: Option<&str>,
 ) -> Result<Response> {
-    let router = match BbsCgiRouter::new(req, env, db, token_cookie, ua).await {
+    let router = match BbsCgiRouter::new(req, env, repo, token_cookie, ua).await {
         Ok(router) => router,
         Err(resp) => return resp,
     };
@@ -146,7 +144,7 @@ pub async fn route_bbs_cgi(
 }
 
 struct BbsCgiRouter<'a> {
-    db: &'a D1Database,
+    repo: &'a BbsRepository<'a>,
     token_cookie: Option<&'a str>,
     ip_addr: String,
     form: BbsCgiForm,
@@ -161,7 +159,7 @@ impl<'a> BbsCgiRouter<'a> {
     async fn new(
         req: &'a mut Request,
         env: &Env,
-        db: &'a D1Database,
+        repo: &'a BbsRepository<'a>,
         token_cookie: Option<&'a str>,
         ua: Option<String>,
     ) -> std::result::Result<BbsCgiRouter<'a>, Result<Response>> {
@@ -196,7 +194,7 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         Ok(Self {
-            db,
+            repo,
             token_cookie,
             ip_addr,
             form,
@@ -228,17 +226,12 @@ impl<'a> BbsCgiRouter<'a> {
         };
 
         let authenticated_user_cookie = if let Some(tk) = token_cookie_candidate {
-            let Ok(stmt) = self
-                .db
-                .prepare("SELECT * FROM authed_cookies WHERE cookie = ?")
-                .bind(&[tk.into()])
-            else {
-                return Response::error("internal server error - check auth bind", 500);
+            let Ok(authed_token) = self.repo.get_authed_token(tk).await else {
+                return Response::error("internal server error - check auth", 500);
             };
-
-            if let Ok(Some(r)) = stmt.first::<AuthedCookie>(None).await {
-                if r.authed == 1 {
-                    Some(r)
+            if let Some(authed_token) = authed_token {
+                if authed_token.authed == 1 {
+                    Some(authed_token)
                 } else {
                     None
                 }
@@ -267,22 +260,14 @@ impl<'a> BbsCgiRouter<'a> {
             let auth_code = generate_six_digit_num();
             let writed_time = get_unix_timetamp_sec().to_string();
 
-            let Ok(stmt) = self
-                .db
-                .prepare("INSERT INTO authed_cookies (cookie, origin_ip, authed, auth_code, writed_time) VALUES (?, ?, ?, ?, ?)")
-                .bind(&[
-                    token.to_string().into(),
-                    self.ip_addr.to_string().into(),
-                    0.into(),
-                    auth_code.clone().into(),
-                    writed_time.into(),
-                ])
-            else {
-                return Response::error("internal server error - auth bind", 500);
+            let authed_token = CreatingAuthedToken {
+                token: &token,
+                origin_ip: &self.ip_addr,
+                writed_time: &writed_time,
+                auth_code: &auth_code,
             };
-
-            if stmt.run().await.is_err() {
-                return Response::error("internal server error - db", 500);
+            if let Err(e) = self.repo.create_authed_token(authed_token).await {
+                return Response::error(format!("internal server error - {e}"), 500);
             }
 
             let is_mate = self.ua.map(|x| x.contains("Mate")).unwrap_or(false);
@@ -378,20 +363,17 @@ impl<'a> BbsCgiRouter<'a> {
         &self,
         cookie: &str,
     ) -> std::result::Result<u64, &'static str> {
-        let Ok(stmt) = self
-            .db
-            .prepare("SELECT * FROM responses WHERE authed_token = ? AND timestamp > ?")
-            .bind(&[
-                cookie.into(),
-                (self.unix_time - RECENT_RES_SECONDS).to_string().into(),
-            ])
+        let Ok(responses) = self
+            .repo
+            .get_responses_by_authed_token_and_timestamp(
+                cookie,
+                &(self.unix_time - RECENT_RES_SECONDS).to_string(),
+            )
+            .await
         else {
-            return Err("internal server error - auth bind");
+            return Err("internal server error - auth min response span");
         };
 
-        let Ok(responses) = stmt.all().await.and_then(|res| res.results::<Res>()) else {
-            return Err("internal server error - auth bind");
-        };
         if responses.is_empty() {
             return Ok(u64::max_value());
         }
@@ -410,42 +392,6 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(ts_min)
     }
 
-    async fn get_thread(
-        &self,
-        thread_id: &str,
-    ) -> std::result::Result<Option<Thread>, &'static str> {
-        let Ok(get_thread_stmt) = self
-            .db
-            .prepare("SELECT * FROM threads WHERE thread_number = ? AND archived = 0")
-            .bind(&[thread_id.into()])
-        else {
-            return Err("Bad request - get_thread_stmt.is_err()");
-        };
-        let Ok(thread_info) = get_thread_stmt.first::<Thread>(None).await else {
-            return Err("Bad request - get_thread_stmt.first().is_err()");
-        };
-
-        Ok(thread_info)
-    }
-
-    async fn update_last_thread_creation(
-        &self,
-        cookie: &str,
-    ) -> std::result::Result<(), &'static str> {
-        let Ok(stmt) = self
-            .db
-            .prepare("UPDATE authed_cookies SET last_thread_creation = ? WHERE cookie = ?")
-            .bind(&[self.unix_time.to_string().into(), cookie.into()])
-        else {
-            return Err("internal server error - auth bind");
-        };
-        if stmt.run().await.is_err() {
-            return Err("internal server error - db");
-        }
-
-        Ok(())
-    }
-
     async fn create_thread(self, cookie: &str) -> Result<Response> {
         let BbsCgiForm {
             subject,
@@ -455,44 +401,38 @@ impl<'a> BbsCgiRouter<'a> {
             ..
         } = &self.form;
 
-        let thread = self.db.prepare(
-            "INSERT INTO threads (thread_number, title, response_count, board_id, last_modified, authed_cookie) VALUES (?, ?, 1, 1, ?, ?)",
-        ).bind(&[self.unix_time.to_string().into(), subject.clone().unwrap().into(), self.unix_time.to_string().into(), cookie.into()]);
+        let unix_time = self.unix_time.to_string();
+        let thread = CreatingThread {
+            title: subject.as_ref().unwrap(),
+            unix_time: &unix_time,
+            body,
+            name,
+            mail,
+            date_time: &get_current_date_time_string(true),
+            author_ch5id: self.id.as_ref().unwrap(),
+            authed_token: cookie,
+            ip_addr: &self.ip_addr,
+            board_id: 1, // for now
+        };
 
-        let response = self.db.prepare(
-            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).bind(&[name.into(),
-            mail.into(),
-            get_current_date_time_string(true).into(),
-            self.id.clone().unwrap().into(),
-            body.into(),
-            self.unix_time.to_string().into(),
-            self.ip_addr.clone().into(),
-            cookie.into(),
-            self.unix_time.to_string().into(),
-        ]);
-        self.update_last_thread_creation(cookie).await?;
-
-        match (thread, response) {
-            (Ok(thread), Ok(response)) => {
-                if let Err(e) = thread.run().await {
-                    return if e.to_string().to_lowercase().contains("unique") {
-                        response_shift_jis_text_html(
-                            WRITING_FAILED_HTML_RESPONSE
-                                .replace("{reason}", "同じ時間に既にスレッドが立っています"),
-                        )
-                    } else {
-                        Response::error("internal server error", 500)
-                    };
-                }
-
-                if response.run().await.is_err() {
-                    Response::error("internal server error", 500)
+        match self.repo.create_thread(thread).await {
+            Ok(_) => {
+                let _ = self
+                    .repo
+                    .update_authed_token_last_thread_creation(cookie, &unix_time)
+                    .await;
+                response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string())
+            }
+            Err(e) => {
+                if e.to_string().contains("thread already exists") {
+                    response_shift_jis_text_html(
+                        WRITING_FAILED_HTML_RESPONSE
+                            .replace("{reason}", "同じ時間に既にスレッドが立っています"),
+                    )
                 } else {
-                    response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string())
+                    Response::error(format!("internal server error - {e}"), 500)
                 }
             }
-            _ => Response::error("internal server error", 500),
         }
     }
 
@@ -505,9 +445,22 @@ impl<'a> BbsCgiRouter<'a> {
             ..
         } = &self.form;
 
-        let thread_id = thread_id.clone().unwrap();
+        let res = CreatingRes {
+            unix_time: &self.unix_time.to_string(),
+            body,
+            name,
+            mail,
+            date_time: &get_current_date_time_string(true),
+            authed_token: cookie,
+            ip_addr: &self.ip_addr,
+            board_id: 1, // for now
+            author_ch5id: self.id.as_ref().unwrap(),
+            thread_id: thread_id.as_ref().unwrap(),
+        };
 
-        let thread_info = self.get_thread(&thread_id).await?;
+        let Ok(thread_info) = self.repo.get_thread(1, thread_id.as_ref().unwrap()).await else {
+            return Response::error("internal server error - get thread", 500);
+        };
         if let Some(thread_info) = thread_info {
             if thread_info.active == 0 {
                 return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
@@ -521,54 +474,9 @@ impl<'a> BbsCgiRouter<'a> {
             );
         }
 
-        let update_thread_stmt = self
-            .db
-            .prepare(
-                "UPDATE threads SET response_count = response_count + 1,
-            last_modified = ?,
-            active = (
-                CASE
-                    WHEN response_count >= 999 THEN 0
-                    ELSE 1
-                END
-            )
-            WHERE thread_number = ?",
-            ) // 999 means thread stopper 1000
-            .bind(&[self.unix_time.to_string().into(), thread_id.clone().into()]);
-
-        if let Err(e) = update_thread_stmt {
-            return Response::error(format!("Bad request - thread.is_err() {e}"), 400);
-        }
-
-        let response = self.db.prepare(
-            "INSERT INTO responses (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).bind(&[
-            name.into(),
-            mail.into(),
-            get_current_date_time_string(true).into(),
-            self.id.unwrap().into(),
-            body.into(),
-            thread_id.into(),
-            self.ip_addr.into(),
-            cookie.into(),
-            self.unix_time.to_string().into(),
-        ]);
-        if response.is_err() {
-            return Response::error("Bad request - response.is_err()", 400);
-        }
-
-        match (update_thread_stmt, response) {
-            (Ok(thread), Ok(response)) => {
-                if let Err(e) = self.db.batch(vec![thread, response]).await {
-                    Response::error(
-                        format!("internal server error - thread creation batch {}", e),
-                        500,
-                    )
-                } else {
-                    response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string())
-                }
-            }
-            _ => Response::error("internal server error - resp prep", 500),
+        match self.repo.create_response(res).await {
+            Ok(_) => response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string()),
+            Err(e) => Response::error(format!("internal server error - {e}"), 500),
         }
     }
 }
