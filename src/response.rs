@@ -1,5 +1,4 @@
 use minijinja::{context, AutoEscape, Environment};
-use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,7 +21,7 @@ pub trait Ch5ResponsesFormatter {
 const DAT_TEMPLATE: &str = "
 {%- for res in responses -%}
   {%- if res.name is not none and res.name|length > 1 -%}
-    {{ res.name | remove_token }}
+    {{ res.name }}
   {%- else -%}
     {{ default_name }}
   {%- endif -%}
@@ -32,47 +31,17 @@ const DAT_TEMPLATE: &str = "
 {% endfor %}
 ";
 
-pub(crate) struct TokenRemover {
-    regex: Regex,
-    default: String,
-}
-
-impl TokenRemover {
-    pub(crate) fn new(default: &str) -> TokenRemover {
-        TokenRemover {
-            regex: Regex::new(r"[a-z0-9]{30,}?").unwrap(),
-            default: default.to_owned(),
-        }
-    }
-
-    pub(crate) fn remove(&self, name: String) -> String {
-        if name.starts_with('#') || (name.len() >= 30 && self.regex.is_match(&name)) {
-            self.default.clone()
-        } else {
-            name
-        }
-    }
-}
-
 impl Ch5ResponsesFormatter for Vec<Res> {
     fn format_responses(&self, thread_title: &str, default_name: &str) -> String {
         let mut env = Environment::new();
         // TODO(kenmo-melon): Need to escape anything?
         env.set_auto_escape_callback(|_| AutoEscape::None);
-        let token_remover = TokenRemover::new(default_name);
-        env.add_filter("remove_token", move |name| token_remover.remove(name));
         env.add_template("0000000000.dat", DAT_TEMPLATE).unwrap();
         let tmpl = env.get_template("0000000000.dat").unwrap();
         let ress = self
             .iter()
             .map(|x| Res {
-                name: x.name.clone().map(|name| name.chars().take(32).collect()),
-                body: x
-                    .body
-                    .replace("edge.edgebb.workers.dev", "bbs.eddibb.cc")
-                    .chars()
-                    .take(4096)
-                    .collect(),
+                body: x.body.replace("edge.edgebb.workers.dev", "bbs.eddibb.cc"),
                 ..x.clone()
             })
             .collect::<Vec<_>>();

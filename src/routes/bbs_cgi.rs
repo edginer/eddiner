@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, Engine};
 use md5::{Digest, Md5};
 use pwhash::unix;
+use regex_lite::Regex;
 use sha1::Sha1;
 use worker::*;
 
@@ -25,6 +26,26 @@ const REQUEST_AUTHENTICATION_LOCAL: &str =
 
 const RECENT_RES_SECONDS: u64 = 40;
 const N_MAX_RECENT_AUTH_PER_IP: u32 = 3;
+
+struct TokenRemover {
+    regex: Regex,
+}
+
+impl TokenRemover {
+    pub(crate) fn new() -> TokenRemover {
+        TokenRemover {
+            regex: Regex::new(r"[a-z0-9]{30,}?").unwrap(),
+        }
+    }
+
+    pub(crate) fn remove(&self, name: String) -> String {
+        if name.len() >= 30 && self.regex.is_match(&name) {
+            String::new()
+        } else {
+            name
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct BbsCgiForm {
@@ -99,9 +120,13 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     let name_segments = result["FROM"].split('#').collect::<Vec<_>>();
     let name = name_segments[0];
     let name = if name_segments.len() == 1 {
-        sanitize(name).replace('◆', "◇").replace("&#9670;", "◇")
+        let token_remover = TokenRemover::new();
+        let name = token_remover.remove(name.to_string());
+        sanitize(&name).replace('◆', "◇").replace("&#9670;", "◇")
     } else {
-        let trip = sanitize(&name_segments[1..].concat());
+        let trip = sanitize(&name_segments[1..].concat())
+            .replace('◆', "◇")
+            .replace("&#9670;", "◇");
         let trip = calculate_trip(&trip);
         format!("{name}◆{trip}")
     };

@@ -1,5 +1,4 @@
 use crate::repositories::bbs_repository::ThreadStatus;
-use crate::response::TokenRemover;
 use crate::utils::into_workers_err;
 use crate::{board_config::BoardConfig, repositories::bbs_repository::BbsRepository};
 
@@ -89,8 +88,6 @@ pub(crate) async fn route_thread(
     let mut env = Environment::new();
     env.add_template("thread.html", THREAD_HTML)
         .map_err(into_workers_err)?;
-    let token_remover = TokenRemover::new(board.default_name);
-    env.add_filter("remove_token", move |name| token_remover.remove(name));
     let tmpl = env.get_template("thread.html").map_err(into_workers_err)?;
     let html = tmpl
         .render(context!(board, thread, responses))
