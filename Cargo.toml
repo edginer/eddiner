@@ -27,6 +27,7 @@ worker = { version = "0.0.18", features = ["d1"] }
 getrandom = { version = "0.2.10", features = ["js"] }
 minijinja = { version = "1.0.8", default-features = false, features = ["builtins"] }
 regex-lite = "0.1.0"
+anyhow = "1.0.75"
 
 [dev-dependencies]
 criterion = { version = "0.5" }
