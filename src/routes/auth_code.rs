@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use worker::*;
 
 use crate::{
-    authed_cookie::AuthedCookie, turnstile::TurnstileResponse, utils::get_unix_timetamp_sec,
+    repositories::bbs_repository::BbsRepository, turnstile::TurnstileResponse,
+    utils::get_unix_timetamp_sec,
 };
 
 const AUTH_GETTING_HTML: &str = include_str!("templates/auth_code_getting.html");
@@ -16,7 +17,7 @@ pub fn route_auth_code_get(site_key: &str) -> Result<Response> {
 
 pub async fn route_auth_code_post(
     req: &mut Request,
-    db: &D1Database,
+    repo: &BbsRepository<'_>,
     secret_key: &str,
 ) -> Result<Response> {
     let Ok(body) = req.form_data().await else {
@@ -57,13 +58,10 @@ pub async fn route_auth_code_post(
             return Response::error("Bad request", 400);
         };
 
-        let Ok(stmt) = db
-            .prepare("SELECT * FROM authed_cookies WHERE origin_ip = ? AND auth_code = ?")
-            .bind(&[ip.into(), auth_code.clone().into()])
+        let Ok(result) = repo
+            .get_authed_token_by_origin_ip_and_auth_code(&ip, &auth_code)
+            .await
         else {
-            return Response::error("internal server error: DB", 500);
-        };
-        let Ok(result) = stmt.first::<AuthedCookie>(None).await else {
             return Response::error("internal server error: DB", 500);
         };
 
@@ -83,17 +81,11 @@ pub async fn route_auth_code_post(
             .map(|r| r.with_status(400));
         }
 
-        let Ok(stmt) = db
-            .prepare("UPDATE authed_cookies SET authed = ?, authed_time = ? WHERE cookie = ?")
-            .bind(&[
-                1.into(),
-                get_unix_timetamp_sec().to_string().into(),
-                authed_cookie.cookie.clone().into(),
-            ])
-        else {
-            return Response::error("internal server error: DB", 500);
-        };
-        if stmt.run().await.is_err() {
+        if repo
+            .update_authed_status(&authed_cookie.cookie, &get_unix_timetamp_sec().to_string())
+            .await
+            .is_err()
+        {
             return Response::error("internal server error: DB", 500);
         }
 

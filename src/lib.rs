@@ -79,14 +79,15 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let cache = Cache::default();
     let token_cookie = get_token_cookies(&req);
     let ua = req.headers().get("User-Agent").ok().flatten();
+    let Ok(db) = env.d1("DB") else {
+        return Response::error("internal server error: DB", 500);
+    };
+    let repo = BbsRepository::new(&db);
 
     match &*req.path() {
         "/auth/" | "/auth" => {
             if req.method() == Method::Post {
-                let Ok(db) = env.d1("DB") else {
-                    return Response::error("internal server error: DB", 500);
-                };
-                route_auth_post(&mut req, &db, &secret_key).await
+                route_auth_post(&mut req, &repo, &secret_key).await
             } else if req.method() == Method::Get {
                 route_auth_get(&req, &site_key)
             } else {
@@ -95,10 +96,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
         "/auth-code/" | "/auth-code" => {
             if req.method() == Method::Post {
-                let Ok(db) = env.d1("DB") else {
-                    return Response::error("internal server error: DB", 500);
-                };
-                route_auth_code_post(&mut req, &db, &secret_key).await
+                route_auth_code_post(&mut req, &repo, &secret_key).await
             } else if req.method() == Method::Get {
                 route_auth_code_get(&site_key)
             } else {
@@ -121,10 +119,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Ok(s);
             }
 
-            let Ok(db) = env.d1("DB") else {
-                return Response::error("internal server error - db", 500);
-            };
-            let repo = BbsRepository::new(&db);
             let host_url = match utils::get_host_url(&req) {
                 Ok(url) => url,
                 Err(res) => return res,
@@ -143,10 +137,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if let Ok(Some(s)) = cache.get(&req, false).await {
                 return Ok(s);
             }
-            let Ok(db) = env.d1("DB") else {
-                return Response::error("internal server error: DB", 500);
-            };
-            let repo = BbsRepository::new(&db);
             let mut result = route_subject_txt(&repo).await?;
 
             if let Ok(result) = result.cloned() {
@@ -162,11 +152,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if req.method() != Method::Post {
                 return Response::error("Bad request", 400);
             }
-
-            let Ok(db) = env.d1("DB") else {
-                return Response::error("internal server error - db", 500);
-            };
-            let repo = BbsRepository::new(&db);
             route_bbs_cgi(&mut req, &env, ua, &repo, token_cookie.as_deref()).await
         }
         e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
@@ -174,9 +159,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Ok(s);
             }
 
-            let Ok(db) = env.d1("DB") else {
-                return Response::error("internal server error: DB", 500);
-            };
             let bucket = env.bucket("ARCHIVE_BUCKET").ok();
 
             let range = req.headers().get("Range").ok().flatten();
@@ -186,11 +168,9 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             else {
                 return Response::error("internal server error - failed to parse url", 500);
             };
-            let repo = BbsRepository::new(&db);
 
             let mut result =
                 route_dat(e, &ua, range, if_modified_since, &repo, &bucket, host_url).await?;
-
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;
@@ -226,10 +206,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(thread_id) = rest_url[..slash_idx].parse::<u64>() else {
                 return Response::error("Not found", 404);
             };
-            let Ok(db) = env.d1("DB") else {
-                return Response::error("internal server error: DB", 500);
-            };
-            let repo = BbsRepository::new(&db);
             let mut resp = webui::route_thread(thread_id, &BOARDS[0], &repo, &host_url).await?;
             if let Ok(result) = resp.cloned() {
                 if result.status_code() == 200 {

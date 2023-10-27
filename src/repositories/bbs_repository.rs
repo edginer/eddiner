@@ -121,6 +121,26 @@ impl BbsRepository<'_> {
         }
     }
 
+    pub async fn get_authed_token_by_origin_ip_and_auth_code(
+        &self,
+        ip: &str,
+        auth_code: &str,
+    ) -> anyhow::Result<Option<AuthedCookie>> {
+        let Ok(stmt) = self
+            .db
+            .prepare("SELECT * FROM authed_cookies WHERE origin_ip = ? AND auth_code = ?")
+            .bind(&[ip.into(), auth_code.into()])
+        else {
+            return Err(anyhow::anyhow!("failed to bind ip and auth_code"));
+        };
+
+        if let Ok(authed_cookie) = stmt.first::<AuthedCookie>(None).await {
+            Ok(authed_cookie)
+        } else {
+            Err(anyhow::anyhow!("failed to fetch authed_cookie"))
+        }
+    }
+
     pub async fn create_thread(&self, thread: CreatingThread<'_>) -> anyhow::Result<()> {
         let th_stmt = self
             .db
@@ -256,6 +276,22 @@ impl BbsRepository<'_> {
             .db
             .prepare("UPDATE authed_cookies SET last_thread_creation = ? WHERE cookie = ?")
             .bind(&[unix_time.into(), token.into()])
+        else {
+            return Err(anyhow::anyhow!("failed to bind token"));
+        };
+
+        if stmt.run().await.is_err() {
+            Err(anyhow::anyhow!("failed to update authed_token"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn update_authed_status(&self, token: &str, authed_time: &str) -> anyhow::Result<()> {
+        let Ok(stmt) = self
+            .db
+            .prepare("UPDATE authed_cookies SET authed = ?, authed_time = ? WHERE cookie = ?")
+            .bind(&[1.into(), authed_time.into(), token.into()])
         else {
             return Err(anyhow::anyhow!("failed to bind token"));
         };

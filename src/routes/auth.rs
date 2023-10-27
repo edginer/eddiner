@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use worker::*;
 
 use crate::{
-    authed_cookie::AuthedCookie, turnstile::TurnstileResponse, utils::get_unix_timetamp_sec,
+    repositories::bbs_repository::BbsRepository, turnstile::TurnstileResponse,
+    utils::get_unix_timetamp_sec,
 };
 
 const AUTH_GETTING_HTML: &str = include_str!("templates/auth_getting.html");
@@ -12,7 +13,7 @@ const AUTH_SUCCESSFUL_HTML: &str = include_str!("templates/auth_successful.html"
 
 pub async fn route_auth_post(
     req: &mut Request,
-    db: &D1Database,
+    repo: &BbsRepository<'_>,
     secret_key: &str,
 ) -> Result<Response> {
     let Ok(body) = req.form_data().await else {
@@ -52,13 +53,7 @@ pub async fn route_auth_post(
             return Response::error("Bad request", 400);
         };
 
-        let Ok(stmt) = db
-            .prepare("SELECT * FROM authed_cookies WHERE cookie = ?")
-            .bind(&[edge_token.clone().into()])
-        else {
-            return Response::error("internal server error: DB", 500);
-        };
-        let Ok(Some(result)) = stmt.first::<AuthedCookie>(None).await else {
+        let Ok(Some(result)) = repo.get_authed_token(&token).await else {
             return Response::error("internal server error: DB", 500);
         };
         if result.origin_ip != ip {
@@ -68,17 +63,11 @@ pub async fn route_auth_post(
             .map(|r| r.with_status(400));
         }
 
-        let Ok(stmt) = db
-            .prepare("UPDATE authed_cookies SET authed = ?, authed_time = ? WHERE cookie = ?")
-            .bind(&[
-                1.into(),
-                get_unix_timetamp_sec().to_string().into(),
-                edge_token.clone().into(),
-            ])
-        else {
-            return Response::error("internal server error: DB", 500);
-        };
-        if stmt.run().await.is_err() {
+        if repo
+            .update_authed_status(&edge_token, &get_unix_timetamp_sec().to_string())
+            .await
+            .is_err()
+        {
             return Response::error("internal server error: DB", 500);
         }
 

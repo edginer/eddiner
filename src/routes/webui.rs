@@ -1,6 +1,5 @@
 use crate::repositories::bbs_repository::ThreadStatus;
 use crate::response::TokenRemover;
-use crate::thread::Thread;
 use crate::utils::into_workers_err;
 use crate::{board_config::BoardConfig, repositories::bbs_repository::BbsRepository};
 
