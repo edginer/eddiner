@@ -1,10 +1,11 @@
+use crate::repositories::bbs_repository::ThreadStatus;
 use crate::response::TokenRemover;
 use crate::thread::Thread;
 use crate::utils::into_workers_err;
 use crate::{board_config::BoardConfig, repositories::bbs_repository::BbsRepository};
 
 use minijinja::{context, Environment};
-use worker::{D1Database, Response, Result};
+use worker::{Response, Result};
 
 const BOARD_HTML: &str = include_str!("templates/board.html");
 const INDEX_HTML: &str = include_str!("templates/index.html");
@@ -35,7 +36,7 @@ pub(crate) fn route_index(
 pub(crate) async fn route_board(
     host_url: &str,
     board: &BoardConfig,
-    db: &D1Database,
+    repo: &BbsRepository<'_>,
 ) -> Result<Response> {
     // TODO: this restriction is only for eddi. It should be removed in the future.
     if host_url.contains("workers.dev") {
@@ -43,13 +44,10 @@ pub(crate) async fn route_board(
     }
 
     // Get threads from db
-    let Ok(stmt) = db
-        .prepare("SELECT * FROM threads WHERE active = 1 AND board_id = ?")
-        .bind(&[board.board_id.to_string().into()])
+    let Ok(threads) = repo
+        .get_threads(board.board_id as usize, ThreadStatus::Active)
+        .await
     else {
-        return Response::error("internal server error: select threads from db", 500);
-    };
-    let Ok(threads) = stmt.all().await.and_then(|data| data.results::<Thread>()) else {
         return Response::error("internal server error: convertion", 500);
     };
 
@@ -69,25 +67,17 @@ pub(crate) async fn route_board(
 pub(crate) async fn route_thread(
     thread_id: u64,
     board: &BoardConfig,
-    db: &D1Database,
+    repo: &BbsRepository<'_>,
     host_url: &str,
 ) -> Result<Response> {
-    let repo = BbsRepository::new(db);
-
     // TODO: this restriction is only for eddi. It should be removed in the future.
     if host_url.contains("workers.dev") {
         return webui_disabled("edgebb");
     }
 
-    // Get threads from db
     let thread_id = thread_id.to_string();
-    let Ok(stmt) = db
-        .prepare("SELECT * FROM threads WHERE active = 1 AND board_id = ? AND thread_number = ?")
-        .bind(&[board.board_id.into(), (&*thread_id).into()])
-    else {
-        return Response::error("internal server error: select threads from db", 500);
-    };
-    let thread = match stmt.first::<Thread>(None).await {
+    // Get threads from db
+    let thread = match repo.get_thread(board.board_id as usize, &thread_id).await {
         Ok(Some(thread)) => thread,
         Ok(None) => return Response::error("internal server error", 500),
         Err(e) => return Response::error(format!("DB error {}", e), 500),

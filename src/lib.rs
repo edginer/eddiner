@@ -124,11 +124,12 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error - db", 500);
             };
+            let repo = BbsRepository::new(&db);
             let host_url = match utils::get_host_url(&req) {
                 Ok(url) => url,
                 Err(res) => return res,
             };
-            let mut resp = webui::route_board(&host_url, &BOARDS[0], &db).await?;
+            let mut resp = webui::route_board(&host_url, &BOARDS[0], &repo).await?;
             if let Ok(result) = resp.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;
@@ -228,7 +229,8 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Ok(db) = env.d1("DB") else {
                 return Response::error("internal server error: DB", 500);
             };
-            let mut resp = webui::route_thread(thread_id, &BOARDS[0], &db, &host_url).await?;
+            let repo = BbsRepository::new(&db);
+            let mut resp = webui::route_thread(thread_id, &BOARDS[0], &repo, &host_url).await?;
             if let Ok(result) = resp.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;
