@@ -93,7 +93,7 @@ pub(crate) async fn route_thread(
         .render(context!(board, thread, responses))
         .map_err(into_workers_err)?;
     Response::from_html(html).map(|mut x| {
-        let _ = x.headers_mut().append("Cache-Control", "s-maxage=5");
+        let _ = x.headers_mut().append("Cache-Control", "s-maxage=15");
         x
     })
 }

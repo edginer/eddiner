@@ -71,7 +71,7 @@ pub async fn route_dat(
         if let Some(first_res) = responses.get_mut(0) {
             first_res.body
                 .push_str(
-                    "<br><br> 【以下運営からのメッセージ】<br>あなたは将来的に廃止される旧ドメインを使用しています。 <br>新ドメイン https://bbs.eddibb.cc/liveedge/ に移行してください"
+                    "<br><br> 【以下運営からのメッセージ】<br>あなたは将来的に廃止される旧ドメインを使用しています。 <br>新ドメイン https://bbs.eddibb.cc/liveedge/ に移行してください<br>旧ドメインからの新規認証は終了しました。"
                 )
         }
     }

@@ -77,8 +77,11 @@ fn generate_dat_string(b: &mut Bencher<'_>) {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("dat_jinja", generate_dat_jinja);
-    c.bench_function("dat_string", generate_dat_string);
+    let mut group = c.benchmark_group("dat-format");
+    group.sample_size(10000);
+    group.bench_function("dat_jinja", generate_dat_jinja);
+    group.bench_function("dat_string", generate_dat_string);
+    group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
