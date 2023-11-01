@@ -268,6 +268,13 @@ impl<'a> BbsCgiRouter<'a> {
         };
 
         let Some(authenticated_user_cookie) = authenticated_user_cookie else {
+            if self.host_url.contains("workers.dev") {
+                return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
+                    "{reason}",
+                    "旧ドメインからの新規認証は終了しました。<br>新ドメインの板 https://bbs.eddibb.cc/liveedge/ を新規に外部板登録してから書き込んでください。",
+                ));
+            }
+
             // If the user is trying to get authed cookie too many times, it might be a script.
             // Even if not, it may be better to reject such access to reduce write access to db.
             let n_r_auth = n_recent_auth(&self.ip_addr)?;

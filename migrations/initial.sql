@@ -23,7 +23,8 @@ CREATE TABLE responses (
     body TEXT NOT NULL,
     thread_id TEXT NOT NULL,
     ip_addr TEXT NOT NULL,
-    authed_token TEXT
+    authed_token TEXT,
+    timestamp INTEGER DEFAULT 0
 );
 
 CREATE TABLE boards (
@@ -38,8 +39,7 @@ CREATE TABLE authed_cookies (
     origin_ip TEXT NOT NULL,
     authed INTEGER NOT NULL,
     writed_time TEXT,
-    auth_code TEXT,
-    last_wrote_time TEXT
+    auth_code TEXT
 );
 
 CREATE TABLE archives (
@@ -70,5 +70,6 @@ CREATE INDEX authed_cookies_origin_ip ON authed_cookies(origin_ip);
 
 CREATE UNIQUE INDEX threads_thread_number_idx ON threads(thread_number);
 CREATE INDEX responses_thread_number_idx ON responses(thread_id);
+CREATE INDEX responses_authed_token_idx ON responses(authed_token);
 
-CREATE INDEX archives_thread_number_idx ON archives (thread_number);
+CREATE INDEX archives_thread_number_idx ON archives(thread_number);
