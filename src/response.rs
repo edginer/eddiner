@@ -12,6 +12,7 @@ pub struct Res {
     pub ip_addr: String,
     pub authed_token: Option<String>,
     pub timestamp: u64,
+    pub is_abone: u32,
 }
 
 pub trait Ch5ResponsesFormatter {
@@ -40,9 +41,15 @@ impl Ch5ResponsesFormatter for Vec<Res> {
         let tmpl = env.get_template("0000000000.dat").unwrap();
         let ress = self
             .iter()
-            .map(|x| Res {
-                body: x.body.replace("edge.edgebb.workers.dev", "bbs.eddibb.cc"),
-                ..x.clone()
+            .map(|x| {
+                if x.is_abone == 0 {
+                    Res {
+                        body: x.body.replace("edge.edgebb.workers.dev", "bbs.eddibb.cc"),
+                        ..x.clone()
+                    }
+                } else {
+                    create_abone_res(x.clone())
+                }
             })
             .collect::<Vec<_>>();
         tmpl.render(context!(responses => ress, thread_title, default_name))
@@ -50,11 +57,22 @@ impl Ch5ResponsesFormatter for Vec<Res> {
     }
 }
 
+fn create_abone_res(res: Res) -> Res {
+    Res {
+        name: Some("あぼーん".to_string()),
+        mail: Some("あぼーん".to_string()),
+        date: "".to_string(),
+        author_id: None,
+        body: "あぼーん".to_string(),
+        ..res
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Ch5ResponsesFormatter, Res};
 
-    fn make_test_res(name: Option<&str>, body: &str, sec: u32) -> Res {
+    fn make_test_res(name: Option<&str>, body: &str, sec: u32, is_abone: bool) -> Res {
         Res {
             name: name.map(ToOwned::to_owned),
             mail: None,
@@ -65,16 +83,22 @@ mod tests {
             ip_addr: "1.1.1.1".to_owned(),
             authed_token: None,
             timestamp: 0,
+            is_abone: if is_abone { 1 } else { 0 },
         }
     }
     #[test]
     fn test_render_dat() {
-        let res_1 = make_test_res(Some("コテハン"), "ええ？", 10);
-        let res_2 = make_test_res(Some(""), "うん？\n。。。", 20);
-        let res_3 = make_test_res(None, "そう...", 30);
-        let res_4 = make_test_res(Some("#abcdefg"), "認証てすと", 40);
+        let res_1 = make_test_res(Some("コテハン"), "ええ？", 10, false);
+        let res_2 = make_test_res(Some(""), "うん？\n。。。", 20, false);
+        let res_3 = make_test_res(None, "そう...", 30, false);
+        let res_4 = make_test_res(Some("#abcdefg"), "認証てすと", 40, false);
         // name.len() == 30
-        let res_5 = make_test_res(Some("a0b1c2d3e4f5g6h7i8j9k10l11m12n"), "認証できた？", 50);
+        let res_5 = make_test_res(
+            Some("a0b1c2d3e4f5g6h7i8j9k10l11m12n"),
+            "認証できた？",
+            50,
+            false,
+        );
         let responses = vec![res_1, res_2, res_3, res_4, res_5];
         let formatted = responses.format_responses("実況スレ", "デフォルト名無し");
         assert_eq!(
