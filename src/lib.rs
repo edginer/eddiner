@@ -10,6 +10,7 @@ use routes::{
     subject_txt::route_subject_txt,
     webui,
 };
+use utils::response_shift_jis_text_plain_with_cache;
 use worker::*;
 
 mod authed_cookie;
@@ -179,6 +180,47 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             Ok(result)
         }
+        e if e.starts_with("/liveedge/kako/") && e.ends_with(".dat") => {
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
+            let thread_id_seg = e.replace(".dat", "").replace("/liveedge/kako/", "");
+            let thread_id_seg = thread_id_seg.split('/').collect::<Vec<_>>();
+            if thread_id_seg.len() != 3 {
+                return Response::error("Not found", 404);
+            }
+            let thread_id = thread_id_seg[2];
+            let Ok(thread_id) = thread_id.parse::<u64>() else {
+                return Response::error("Bad request - url parsing", 400);
+            };
+            let thread_id = thread_id.to_string();
+
+            let Some(bucket) = env.bucket("ARCHIVE_BUCKET").ok() else {
+                return Response::error("internal server error - bucket", 500);
+            };
+
+            let log = bucket
+                .get(format!("liveedge/dat/{thread_id}.dat"))
+                .execute()
+                .await?;
+
+            let Some(log) = log else {
+                return Response::error("Not found - dat", 404);
+            };
+            let Some(log_body) = log.body() else {
+                return Response::error("Internal server error - dat bucket", 500);
+            };
+
+            let log_text = log_body.text().await?;
+            let mut result = response_shift_jis_text_plain_with_cache(log_text, 86400)?;
+            if let Ok(result) = result.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+
+            Ok(result)
+        }
         e if e.starts_with("/liveedge/") || e.starts_with("/test/read.cgi/liveedge/") => {
             // TODO(kenmo-melon): これだと/liveedge/hogehogeのようなURLにもアクセスできるが、
             // DBにたくさんアクセスする羽目になるよりはマシ？
@@ -231,7 +273,7 @@ async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
         SELECT thread_number
         FROM threads WHERE board_id = 1 AND archived = 0
-        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 70
+        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 60
     )",
     )
     .run()
