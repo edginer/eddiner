@@ -57,6 +57,7 @@ fn generate_responses() -> Vec<Res> {
             ip_addr: "1.1.1.1".to_owned(),
             authed_token: None,
             timestamp: 0,
+            is_abone: 0,
         };
         responses.push(res);
     }
