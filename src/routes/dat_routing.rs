@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use worker::*;
 
 use crate::{
@@ -29,6 +31,33 @@ pub async fn route_dat(
 
     let Some(thread) = thread else {
         return if let Some(bucket) = bucket {
+            if let Some(ua) = ua {
+                let generate_url = |thread_id: &str| {
+                    Url::from_str(&format!(
+                        "http://bbs.eddibb.cc/liveedge/kako/{}/{}/{}.dat",
+                        &thread_id[0..4],
+                        &thread_id[0..5],
+                        thread_id
+                    ))
+                    .unwrap()
+                };
+
+                if ua.contains("Siki") {
+                    return Response::redirect(generate_url(&thread_id));
+                }
+                if let Some(mate_idx) = ua.find("2chMate/0.8.10") {
+                    let sub_version = ua
+                        .chars()
+                        .skip(mate_idx + "2chMate/0.8.10.".len())
+                        .take_while(|x| x.is_numeric())
+                        .collect::<String>();
+                    let sub_version = sub_version.parse::<u32>().unwrap_or(0);
+                    if sub_version >= 174 {
+                        return Response::redirect(generate_url(&thread_id));
+                    }
+                }
+            }
+
             let log = bucket
                 .get(format!("liveedge/dat/{thread_id}.dat"))
                 .execute()
