@@ -6,8 +6,8 @@ use crate::{
     utils::response_shift_jis_text_plain_with_cache,
 };
 
-pub async fn route_subject_txt(repo: &BbsRepository<'_>) -> Result<Response> {
-    let Ok(mut threads) = repo.get_threads(1, ThreadStatus::Unarchived).await else {
+pub async fn route_subject_txt(repo: &BbsRepository<'_>, board_id: usize) -> Result<Response> {
+    let Ok(mut threads) = repo.get_threads(board_id, ThreadStatus::Unarchived).await else {
         return Response::error("internal server error", 500);
     };
 

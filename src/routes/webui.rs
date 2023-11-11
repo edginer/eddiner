@@ -33,7 +33,7 @@ pub(crate) fn route_index(
 
 pub(crate) async fn route_board(
     host_url: &str,
-    board: &BoardConfig,
+    board: &BoardConfig<'_>,
     repo: &BbsRepository<'_>,
 ) -> Result<Response> {
     // TODO: this restriction is only for eddi. It should be removed in the future.
@@ -42,10 +42,7 @@ pub(crate) async fn route_board(
     }
 
     // Get threads from db
-    let Ok(threads) = repo
-        .get_threads(board.board_id as usize, ThreadStatus::Active)
-        .await
-    else {
+    let Ok(threads) = repo.get_threads(board.board_id, ThreadStatus::Active).await else {
         return Response::error("internal server error: convertion", 500);
     };
 
@@ -64,7 +61,7 @@ pub(crate) async fn route_board(
 
 pub(crate) async fn route_thread(
     thread_id: u64,
-    board: &BoardConfig,
+    board: &BoardConfig<'_>,
     repo: &BbsRepository<'_>,
     host_url: &str,
 ) -> Result<Response> {
@@ -75,7 +72,7 @@ pub(crate) async fn route_thread(
 
     let thread_id = thread_id.to_string();
     // Get threads from db
-    let thread = match repo.get_thread(board.board_id as usize, &thread_id).await {
+    let thread = match repo.get_thread(board.board_id, &thread_id).await {
         Ok(Some(thread)) => thread,
         Ok(None) => return Response::error("internal server error", 500),
         Err(e) => return Response::error(format!("DB error {}", e), 500),

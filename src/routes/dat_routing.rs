@@ -3,13 +3,19 @@ use std::str::FromStr;
 use worker::*;
 
 use crate::{
+    board_config::BoardConfig,
     repositories::bbs_repository::BbsRepository,
     response::Ch5ResponsesFormatter,
     utils::{response_shift_jis_text_plain_with_cache, response_shift_jis_with_range},
 };
 
+pub struct DatRoutingThreadInfo<'a> {
+    pub board_conf: &'a BoardConfig<'a>,
+    pub thread_id: &'a str,
+}
+
 pub async fn route_dat(
-    path: &str,
+    thread_info: DatRoutingThreadInfo<'_>,
     ua: &Option<String>,
     range: Option<String>,
     if_modified_since: Option<String>,
@@ -17,15 +23,10 @@ pub async fn route_dat(
     bucket: &Option<Bucket>,
     host: String,
 ) -> Result<Response> {
-    let thread_id = path.replace(".dat", "").replace("/liveedge/dat/", "");
-    let Ok(thread_id) = thread_id.parse::<u64>() else {
-        return Response::error("Bad request - url parsing", 400);
-    };
-    let thread_id = thread_id.to_string();
-    // TODO (kenmo-melon): Get the default name from the board config
-    let default_name = "エッヂの名無し";
-
-    let Ok(thread) = repo.get_thread(1, &thread_id).await else {
+    let Ok(thread) = repo
+        .get_thread(thread_info.board_conf.board_id, thread_info.thread_id)
+        .await
+    else {
         return Response::error("internal server error - get thread", 500);
     };
 
@@ -43,7 +44,7 @@ pub async fn route_dat(
                 };
 
                 if ua.contains("Siki") {
-                    return Response::redirect(generate_url(&thread_id));
+                    return Response::redirect(generate_url(thread_info.thread_id));
                 }
                 if let Some(mate_idx) = ua.find("2chMate/0.8.10") {
                     let sub_version = ua
@@ -53,13 +54,13 @@ pub async fn route_dat(
                         .collect::<String>();
                     let sub_version = sub_version.parse::<u32>().unwrap_or(0);
                     if sub_version >= 174 {
-                        return Response::redirect(generate_url(&thread_id));
+                        return Response::redirect(generate_url(thread_info.thread_id));
                     }
                 }
             }
 
             let log = bucket
-                .get(format!("liveedge/dat/{thread_id}.dat"))
+                .get(format!("liveedge/dat/{}.dat", thread_info.thread_id))
                 .execute()
                 .await?;
 
@@ -91,7 +92,10 @@ pub async fn route_dat(
         }
     }
 
-    let mut responses = match repo.get_responses(1, &thread_id).await {
+    let mut responses = match repo
+        .get_responses(thread_info.board_conf.board_id, thread_info.thread_id)
+        .await
+    {
         Ok(o) => o,
         Err(e) => return Response::error(format!("internal server error - {e}"), 500),
     };
@@ -105,7 +109,7 @@ pub async fn route_dat(
         }
     }
 
-    let body = responses.format_responses(&thread.title, default_name);
+    let body = responses.format_responses(&thread.title, &thread_info.board_conf.default_name);
 
     match (range, ua) {
         (Some(range), Some(ua)) if !ua.contains("Mate") && !ua.contains("Xeno") => {

@@ -1,18 +1,22 @@
 use worker::*;
 
-use crate::utils::response_shift_jis_text_plain;
+use crate::{board_config::BoardConfig, utils::response_shift_jis_text_plain_with_cache};
 
-pub fn route_setting_txt() -> Result<Response> {
-    let builder = String::from(
-        "liveedge@liveedge
-BBS_TITLE=エッヂ
-BBS_TITLE_ORIG=エッヂ
-BBS_NONAME_NAME=エッヂの名無し
-BBS_TITLE_PICTURE=//www2.5ch.net/5ch.gif
+pub fn route_setting_txt(
+    BoardConfig {
+        board_key,
+        title,
+        default_name,
+        ..
+    }: &BoardConfig,
+) -> Result<Response> {
+    let builder = format!(
+        "{board_key}@{board_key}
+BBS_TITLE={title}
+BBS_TITLE_ORIG={title}
+BBS_NONAME_NAME={default_name}
 BBS_TITLE_COLOR=#000000
-BBS_TITLE_LINK=//www.5ch.net/info.html
 BBS_BG_COLOR=#FFFFFF
-BBS_BG_PICTURE=//www2.5ch.net/ba.gif
 BBS_MAKETHREAD_COLOR=#CCFFCC
 BBS_MENU_COLOR=#CCFFCC
 BBS_THREAD_COLOR=#EFEFEF
@@ -51,5 +55,5 @@ BBS_USE_VIPQ2=16
                 ",
     );
 
-    response_shift_jis_text_plain(builder)
+    response_shift_jis_text_plain_with_cache(builder, 86400)
 }

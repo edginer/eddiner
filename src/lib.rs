@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
 use board_config::BoardConfig;
 use cookie::Cookie;
 use repositories::bbs_repository::BbsRepository;
 use routes::{
+    analyze_route,
     auth::{route_auth_get, route_auth_post},
     auth_code::{route_auth_code_get, route_auth_code_post},
     bbs_cgi::route_bbs_cgi,
-    dat_routing::route_dat,
+    dat_routing::{route_dat, DatRoutingThreadInfo},
     head_txt::route_head_txt,
     subject_txt::route_subject_txt,
     webui,
@@ -14,22 +17,14 @@ use utils::response_shift_jis_text_plain_with_cache;
 use worker::*;
 
 mod authed_cookie;
+mod board;
+pub(crate) mod board_config;
 pub(crate) mod inmemory_cache;
 pub mod response;
+pub mod routes;
 mod thread;
-mod utils;
-pub(crate) mod routes {
-    pub(crate) mod auth;
-    pub(crate) mod auth_code;
-    pub(crate) mod bbs_cgi;
-    pub(crate) mod dat_routing;
-    pub(crate) mod head_txt;
-    pub(crate) mod setting_txt;
-    pub(crate) mod subject_txt;
-    pub(crate) mod webui;
-}
-pub(crate) mod board_config;
 mod turnstile;
+mod utils;
 pub(crate) mod repositories {
     pub(crate) mod bbs_repository;
 }
@@ -38,13 +33,6 @@ pub(crate) mod repositories {
 const SITE_TITLE: &str = "edgebb";
 const SITE_NAME: &str = "エッヂ";
 const SITE_DESCRIPTION: &str = "掲示板";
-pub(crate) const BOARDS: &[BoardConfig] = &[BoardConfig {
-    board_id: 1,
-    title: "なんでも実況エッヂ",
-    board_key: "liveedge",
-    description: "エッヂ",
-    default_name: "エッヂの名無し",
-}];
 
 fn get_secrets(env: &Env) -> Option<(String, String)> {
     let site_key = env.var("SITE_KEY").ok()?.to_string();
@@ -71,6 +59,38 @@ fn check_webui_disabled(env: &Env) -> bool {
     }
 }
 
+fn get_board_keys(env: &Env) -> Option<HashMap<String, usize>> {
+    let Ok(board_keys) = env.var("BOARD_KEYS") else {
+        return None;
+    };
+    Some(
+        board_keys
+            .to_string()
+            .split(',')
+            .enumerate()
+            .map(|(id, key)| (key.to_string(), id + 1))
+            .collect::<HashMap<_, _>>(),
+    )
+}
+
+fn get_board_info<'a>(env: &Env, board_id: usize, board_key: &'a str) -> Option<BoardConfig<'a>> {
+    let Ok(board_info) = env.var(board_key) else {
+        return None;
+    };
+    let board_info = board_info.to_string();
+    let info_split = board_info.split(',').collect::<Vec<_>>();
+    if info_split.len() < 2 {
+        None
+    } else {
+        Some(BoardConfig {
+            board_id,
+            board_key,
+            title: info_split[0].to_string(),
+            default_name: info_split[1].to_string(),
+        })
+    }
+}
+
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let Some((site_key, secret_key)) = get_secrets(&env) else {
@@ -84,9 +104,27 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return Response::error("internal server error: DB", 500);
     };
     let repo = BbsRepository::new(&db);
+    let Some(board_keys) = get_board_keys(&env) else {
+        return Response::error(
+            "internal server error: failed to load environment settings",
+            500,
+        );
+    };
 
-    match &*req.path() {
-        "/auth/" | "/auth" => {
+    match analyze_route(req.path().as_str(), &board_keys) {
+        routes::Route::Index => {
+            if check_webui_disabled(&env) {
+                return webui::webui_disabled(SITE_TITLE);
+            }
+            let board_infos = board_keys
+                .iter()
+                .filter_map(|(board_key, board_id)| get_board_info(&env, *board_id, board_key))
+                .collect::<Vec<_>>();
+
+            webui::route_index(SITE_TITLE, SITE_NAME, SITE_DESCRIPTION, &board_infos)
+                .map_err(|e| Error::RustError(format!("Error in index.rs {}", e)))
+        }
+        routes::Route::Auth => {
             if req.method() == Method::Post {
                 route_auth_post(&mut req, &repo, &secret_key).await
             } else if req.method() == Method::Get {
@@ -95,7 +133,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 Response::error("Bad request", 400)
             }
         }
-        "/auth-code/" | "/auth-code" => {
+        routes::Route::AuthCode => {
             if req.method() == Method::Post {
                 route_auth_code_post(&mut req, &repo, &secret_key).await
             } else if req.method() == Method::Get {
@@ -104,58 +142,25 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 Response::error("Bad request", 400)
             }
         }
-        "/" | "/index.html" => {
-            if check_webui_disabled(&env) {
-                return webui::webui_disabled(SITE_TITLE);
-            }
-            webui::route_index(SITE_TITLE, SITE_NAME, SITE_DESCRIPTION, BOARDS)
-                .map_err(|e| Error::RustError(format!("Error in index.rs {}", e)))
-        }
-        "/liveedge/" | "/liveedge" => {
-            if check_webui_disabled(&env) {
-                return webui::webui_disabled(SITE_TITLE);
-            }
-
-            if let Ok(Some(s)) = cache.get(&req, false).await {
-                return Ok(s);
-            }
-
-            let host_url = match utils::get_host_url(&req) {
-                Ok(url) => url,
-                Err(res) => return res,
-            };
-            let mut resp = webui::route_board(&host_url, &BOARDS[0], &repo).await?;
-            if let Ok(result) = resp.cloned() {
-                if result.status_code() == 200 {
-                    let _ = cache.put(&req, result).await;
-                }
-            }
-
-            Ok(resp)
-        }
-        "/liveedge/SETTING.TXT" => routes::setting_txt::route_setting_txt(),
-        "/liveedge/subject.txt" => {
-            if let Ok(Some(s)) = cache.get(&req, false).await {
-                return Ok(s);
-            }
-            let mut result = route_subject_txt(&repo).await?;
-
-            if let Ok(result) = result.cloned() {
-                if result.status_code() == 200 {
-                    let _ = cache.put(&req, result).await;
-                }
-            }
-
-            Ok(result)
-        }
-        "/liveedge/head.txt" => route_head_txt(),
-        "/test/bbs.cgi" => {
+        routes::Route::BbsCgi => {
             if req.method() != Method::Post {
                 return Response::error("Bad request", 400);
             }
-            route_bbs_cgi(&mut req, &env, ua, &repo, token_cookie.as_deref()).await
+            route_bbs_cgi(
+                &mut req,
+                &env,
+                &board_keys,
+                ua,
+                &repo,
+                token_cookie.as_deref(),
+            )
+            .await
         }
-        e if e.starts_with("/liveedge/dat/") && e.ends_with(".dat") => {
+        routes::Route::Dat {
+            board_key,
+            thread_id,
+            board_id,
+        } => {
             if let Ok(Some(s)) = cache.get(&req, false).await {
                 return Ok(s);
             }
@@ -170,8 +175,22 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Response::error("internal server error - failed to parse url", 500);
             };
 
-            let mut result =
-                route_dat(e, &ua, range, if_modified_since, &repo, &bucket, host_url).await?;
+            let Some(board_conf) = get_board_info(&env, board_id, board_key) else {
+                return Response::error("internal server error - failed to load board info", 500);
+            };
+            let mut result = route_dat(
+                DatRoutingThreadInfo {
+                    board_conf: &board_conf,
+                    thread_id,
+                },
+                &ua,
+                range,
+                if_modified_since,
+                &repo,
+                &bucket,
+                host_url,
+            )
+            .await?;
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;
@@ -180,27 +199,21 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             Ok(result)
         }
-        e if e.starts_with("/liveedge/kako/") && e.ends_with(".dat") => {
+        routes::Route::KakoDat {
+            board_key,
+            thread_id,
+            board_id: _,
+        } => {
             if let Ok(Some(s)) = cache.get(&req, false).await {
                 return Ok(s);
             }
-            let thread_id_seg = e.replace(".dat", "").replace("/liveedge/kako/", "");
-            let thread_id_seg = thread_id_seg.split('/').collect::<Vec<_>>();
-            if thread_id_seg.len() != 3 {
-                return Response::error("Not found", 404);
-            }
-            let thread_id = thread_id_seg[2];
-            let Ok(thread_id) = thread_id.parse::<u64>() else {
-                return Response::error("Bad request - url parsing", 400);
-            };
-            let thread_id = thread_id.to_string();
 
             let Some(bucket) = env.bucket("ARCHIVE_BUCKET").ok() else {
                 return Response::error("internal server error - bucket", 500);
             };
 
             let log = bucket
-                .get(format!("liveedge/dat/{thread_id}.dat"))
+                .get(format!("{board_key}/dat/{thread_id}.dat"))
                 .execute()
                 .await?;
 
@@ -221,7 +234,69 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             Ok(result)
         }
-        e if e.starts_with("/liveedge/") || e.starts_with("/test/read.cgi/liveedge/") => {
+        routes::Route::SettingTxt {
+            board_key,
+            board_id,
+        } => {
+            let Some(board_conf) = get_board_info(&env, board_id, board_key) else {
+                return Response::error("internal server error - failed to load board info", 500);
+            };
+            routes::setting_txt::route_setting_txt(&board_conf)
+        }
+        routes::Route::SubjectTxt {
+            board_key: _,
+            board_id,
+        } => {
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
+            let mut result = route_subject_txt(&repo, board_id).await?;
+
+            if let Ok(result) = result.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+
+            Ok(result)
+        }
+        routes::Route::HeadTxt {
+            board_key: _,
+            board_id,
+        } => route_head_txt(board_id, &repo).await,
+        routes::Route::BoardIndex {
+            board_key,
+            board_id,
+        } => {
+            if check_webui_disabled(&env) {
+                return webui::webui_disabled(SITE_TITLE);
+            }
+
+            if let Ok(Some(s)) = cache.get(&req, false).await {
+                return Ok(s);
+            }
+
+            let host_url = match utils::get_host_url(&req) {
+                Ok(url) => url,
+                Err(res) => return res,
+            };
+            let Some(board_config) = get_board_info(&env, board_id, board_key) else {
+                return Response::error("internal server error - failed to load board info", 500);
+            };
+            let mut resp = webui::route_board(&host_url, &board_config, &repo).await?;
+            if let Ok(result) = resp.cloned() {
+                if result.status_code() == 200 {
+                    let _ = cache.put(&req, result).await;
+                }
+            }
+
+            Ok(resp)
+        }
+        routes::Route::ThreadWebUI {
+            board_key,
+            thread_id,
+            board_id,
+        } => {
             // TODO(kenmo-melon): これだと/liveedge/hogehogeのようなURLにもアクセスできるが、
             // DBにたくさんアクセスする羽目になるよりはマシ？
             if check_webui_disabled(&env) {
@@ -235,20 +310,14 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if let Ok(Some(s)) = cache.get(&req, false).await {
                 return Ok(s);
             }
-            let board_idx = e.find("/liveedge/").unwrap();
-            let rest_url = &e[board_idx + "/liveedge/".len()..];
-            let slash_idx = if let Some(slash_idx) = rest_url.find('/') {
-                match &rest_url[slash_idx..] {
-                    "/" | "/index.html" => slash_idx,
-                    _ => return Response::error("Not found", 404),
-                }
-            } else {
-                rest_url.len()
-            };
-            let Ok(thread_id) = rest_url[..slash_idx].parse::<u64>() else {
+            let Ok(thread_id) = thread_id.parse::<u64>() else {
                 return Response::error("Not found", 404);
             };
-            let mut resp = webui::route_thread(thread_id, &BOARDS[0], &repo, &host_url).await?;
+            let Some(board_config) = get_board_info(&env, board_id, board_key) else {
+                return Response::error("internal server error - failed to load board info", 500);
+            };
+
+            let mut resp = webui::route_thread(thread_id, &board_config, &repo, &host_url).await?;
             if let Ok(result) = resp.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;
