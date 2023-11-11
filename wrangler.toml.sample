@@ -17,6 +17,8 @@ bucket_name = 'edge-archive-bucket'
 [vars]
 SITE_KEY = "<fill-your-turnstili-site-key>"
 SECRET_KEY = "<fill-your-turnstili-secret-key>"
+BOARD_KEYS = "liveedge"
+liveedge = "エッヂ,エッヂの名無し"
 
 [triggers]
 crons = ["*/15 * * * *"]

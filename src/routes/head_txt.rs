@@ -1,11 +1,13 @@
 use worker::*;
 
-use crate::{repositories::bbs_repository::BbsRepository, utils::response_shift_jis_text_plain};
+use crate::{
+    repositories::bbs_repository::BbsRepository, utils::response_shift_jis_text_plain_with_cache,
+};
 
 pub async fn route_head_txt(board_id: usize, repo: &BbsRepository<'_>) -> Result<Response> {
     let Ok(Some(board_info)) = repo.get_board_info(board_id).await else {
         return Response::error("internal server error - failed to find board", 500);
     };
 
-    response_shift_jis_text_plain(board_info.local_rule)
+    response_shift_jis_text_plain_with_cache(board_info.local_rule, 3600)
 }
