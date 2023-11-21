@@ -64,24 +64,25 @@ fn generate_responses() -> Vec<Res> {
     responses
 }
 
-fn generate_dat_jinja(b: &mut Bencher<'_>) {
+fn generate_dat_string(b: &mut Bencher<'_>) {
+    let responses = generate_responses();
     b.iter(|| {
-        let responses = generate_responses();
         let _dat = responses.format_responses("スレタイ", "デフォ名無し");
     });
 }
-fn generate_dat_string(b: &mut Bencher<'_>) {
+fn generate_dat_string_shift_jis(b: &mut Bencher<'_>) {
+    let responses = generate_responses();
     b.iter(|| {
-        let responses = generate_responses();
-        let _dat = format_responses_string(&responses, "スレタイ", "デフォ名無し");
+        let dat = format_responses_string(&responses, "スレタイ", "デフォ名無し");
+        let _ = encoding_rs::SHIFT_JIS.encode(&dat).0;
     });
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("dat-format");
     group.sample_size(10000);
-    group.bench_function("dat_jinja", generate_dat_jinja);
     group.bench_function("dat_string", generate_dat_string);
+    group.bench_function("dat_string_encoding", generate_dat_string_shift_jis);
     group.finish();
 }
 

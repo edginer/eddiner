@@ -13,6 +13,24 @@ impl<'a> BbsRepository<'a> {
 }
 
 impl BbsRepository<'_> {
+    pub async fn get_board_info(
+        &self,
+        board_id: usize,
+    ) -> anyhow::Result<Option<crate::board::Board>> {
+        let Ok(stmt) = self
+            .db
+            .prepare("SELECT * FROM boards WHERE id = ?")
+            .bind(&[board_id.into()])
+        else {
+            return Err(anyhow::anyhow!("failed to bind id"));
+        };
+        let Ok(board) = stmt.first::<crate::board::Board>(None).await else {
+            return Err(anyhow::anyhow!("failed to fetch board"));
+        };
+
+        Ok(board)
+    }
+
     pub async fn get_thread(
         &self,
         board_id: usize,
@@ -147,11 +165,12 @@ impl BbsRepository<'_> {
             .prepare(
                 "INSERT INTO threads
                 (thread_number, title, response_count, board_id, last_modified, authed_cookie)
-                VALUES (?, ?, 1, 1, ?, ?)",
+                VALUES (?, ?, 1, ?, ?, ?)",
             )
             .bind(&[
                 thread.unix_time.into(),
                 thread.title.into(),
+                thread.board_id.into(),
                 thread.unix_time.into(),
                 thread.authed_token.into(),
             ]);
@@ -160,8 +179,8 @@ impl BbsRepository<'_> {
             .db
             .prepare(
                 "INSERT INTO responses 
-                (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp, board_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&[
                 thread.name.into(),
@@ -173,6 +192,7 @@ impl BbsRepository<'_> {
                 thread.ip_addr.into(),
                 thread.authed_token.into(),
                 thread.unix_time.into(),
+                thread.board_id.into(),
             ]);
 
         match (th_stmt, res_stmt) {
@@ -206,15 +226,19 @@ impl BbsRepository<'_> {
                     ELSE 1
                 END
             )
-            WHERE thread_number = ?",
+            WHERE thread_number = ? AND board_id = ?",
             ) // 999 means thread stopper 1000
-            .bind(&[res.unix_time.into(), res.thread_id.into()]);
+            .bind(&[
+                res.unix_time.into(),
+                res.thread_id.into(),
+                res.board_id.into(),
+            ]);
         let res_stmt = self
             .db
             .prepare(
                 "INSERT INTO responses 
-                (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp, board_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&[
                 res.name.into(),
@@ -226,6 +250,7 @@ impl BbsRepository<'_> {
                 res.ip_addr.into(),
                 res.authed_token.into(),
                 res.unix_time.into(),
+                res.board_id.into(),
             ]);
 
         match (update_th_stmt, res_stmt) {

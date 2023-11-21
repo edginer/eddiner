@@ -1,9 +1,13 @@
 use worker::*;
 
-use crate::utils::response_shift_jis_text_plain;
+use crate::{
+    repositories::bbs_repository::BbsRepository, utils::response_shift_jis_text_plain_with_cache,
+};
 
-const HEAD_TXT: &str = include_str!("templates/head.txt");
+pub async fn route_head_txt(board_id: usize, repo: &BbsRepository<'_>) -> Result<Response> {
+    let Ok(Some(board_info)) = repo.get_board_info(board_id).await else {
+        return Response::error("internal server error - failed to find board", 500);
+    };
 
-pub fn route_head_txt() -> Result<Response> {
-    response_shift_jis_text_plain(HEAD_TXT.to_string())
+    response_shift_jis_text_plain_with_cache(board_info.local_rule, 3600)
 }

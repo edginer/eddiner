@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use base64::{engine::general_purpose, Engine};
 use md5::{Digest, Md5};
 use pwhash::unix;
@@ -156,11 +158,12 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
 pub async fn route_bbs_cgi(
     req: &mut Request,
     env: &Env,
+    board_keys: &HashMap<String, usize>,
     ua: Option<String>,
     repo: &BbsRepository<'_>,
     token_cookie: Option<&str>,
 ) -> Result<Response> {
-    let router = match BbsCgiRouter::new(req, env, repo, token_cookie, ua).await {
+    let router = match BbsCgiRouter::new(req, env, repo, board_keys, token_cookie, ua).await {
         Ok(router) => router,
         Err(resp) => return resp,
     };
@@ -170,6 +173,7 @@ pub async fn route_bbs_cgi(
 
 struct BbsCgiRouter<'a> {
     repo: &'a BbsRepository<'a>,
+    board_id: usize,
     token_cookie: Option<&'a str>,
     ip_addr: String,
     form: BbsCgiForm,
@@ -185,6 +189,7 @@ impl<'a> BbsCgiRouter<'a> {
         req: &'a mut Request,
         env: &Env,
         repo: &'a BbsRepository<'a>,
+        board_keys: &'a HashMap<String, usize>,
         token_cookie: Option<&'a str>,
         ua: Option<String>,
     ) -> std::result::Result<BbsCgiRouter<'a>, Result<Response>> {
@@ -204,11 +209,11 @@ impl<'a> BbsCgiRouter<'a> {
             };
 
         let Ok(req_bytes) = req.bytes().await else {
-            return Err(Response::error("Bad request", 400));
+            return Err(Response::error("Bad request - read bytes", 400));
         };
         let form = match extract_forms(req_bytes) {
             Some(form) => form,
-            None => return Err(Response::error("Bad request", 400)),
+            None => return Err(Response::error("Bad request - extract forms", 400)),
         };
         let host_url = utils::get_host_url(req)?;
 
@@ -218,8 +223,16 @@ impl<'a> BbsCgiRouter<'a> {
             ));
         }
 
+        let Some(board_id) = board_keys.get(&form.board_key) else {
+            return Err(response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE
+                    .replace("{reason}", "書き込もうとしている板が存在しません"),
+            ));
+        };
+
         Ok(Self {
             repo,
+            board_id: *board_id,
             token_cookie,
             ip_addr,
             form,
@@ -237,10 +250,6 @@ impl<'a> BbsCgiRouter<'a> {
             return response_shift_jis_text_html(
                 WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
             );
-        }
-
-        if self.form.board_key != "liveedge" {
-            return Response::error("Bad request", 400);
         }
 
         let (token_cookie_candidate, is_cap) = match (self.token_cookie, self.form.cap.as_deref()) {
@@ -357,11 +366,20 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         let datetime = get_current_date_time();
-        let id = calculate_trip(&format!(
-            "{}:{}",
-            authenticated_user_cookie.clone().origin_ip,
-            datetime.date(),
-        ))
+        let id = calculate_trip(&if self.board_id == 1 {
+            format!(
+                "{}:{}",
+                authenticated_user_cookie.clone().origin_ip,
+                datetime.date(),
+            )
+        } else {
+            format!(
+                "{}:{}:{}",
+                authenticated_user_cookie.clone().origin_ip,
+                datetime.date(),
+                self.board_id
+            )
+        })
         .chars()
         .take(9)
         .collect::<String>();
@@ -444,7 +462,7 @@ impl<'a> BbsCgiRouter<'a> {
             author_ch5id: self.id.as_ref().unwrap(),
             authed_token: cookie,
             ip_addr: &self.ip_addr,
-            board_id: 1, // for now
+            board_id: self.board_id,
         };
 
         match self.repo.create_thread(thread).await {
@@ -485,12 +503,16 @@ impl<'a> BbsCgiRouter<'a> {
             date_time: &get_current_date_time_string(true),
             authed_token: cookie,
             ip_addr: &self.ip_addr,
-            board_id: 1, // for now
+            board_id: self.board_id,
             author_ch5id: self.id.as_ref().unwrap(),
             thread_id: thread_id.as_ref().unwrap(),
         };
 
-        let Ok(thread_info) = self.repo.get_thread(1, thread_id.as_ref().unwrap()).await else {
+        let Ok(thread_info) = self
+            .repo
+            .get_thread(self.board_id, thread_id.as_ref().unwrap())
+            .await
+        else {
             return Response::error("internal server error - get thread", 500);
         };
         if let Some(thread_info) = thread_info {
