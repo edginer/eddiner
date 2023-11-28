@@ -43,7 +43,7 @@ pub async fn route_dat(
                     .unwrap()
                 };
 
-                if ua.contains("Siki") {
+                if ua.contains("Siki") || ua.contains("twinkle") {
                     return Response::redirect(generate_url(thread_info.thread_id));
                 }
                 if let Some(mate_idx) = ua.find("2chMate/0.8.10") {
