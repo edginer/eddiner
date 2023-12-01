@@ -4,11 +4,13 @@
     <title>認証画面</title>
     <meta charset="utf-8">
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 
 <body>
     <form action="/auth" method="POST">
         <div class="cf-turnstile" data-sitekey="{site_key}" data-theme="light"></div>
+        <div class="g-recaptcha" data-sitekey="{recaptcha_site_key}"></div>
         <input type="submit" value="Submit">
         <input type="hidden" name="edge-token" value="{token}">
     </form>

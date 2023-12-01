@@ -13,7 +13,7 @@ use crate::repositories::bbs_repository::{
 };
 use crate::utils::{
     self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
-    get_unix_timetamp_sec, response_shift_jis_text_html,
+    get_reduced_ip_addr, get_unix_timestamp_sec, response_shift_jis_text_html,
 };
 
 const WRITING_SUCCESS_HTML_RESPONSE: &str =
@@ -181,6 +181,7 @@ struct BbsCgiRouter<'a> {
     id: Option<String>,
     ua: Option<String>,
     host_url: String,
+    _asn: u32,
     local_debugging: bool,
 }
 
@@ -236,11 +237,12 @@ impl<'a> BbsCgiRouter<'a> {
             token_cookie,
             ip_addr,
             form,
-            unix_time: get_unix_timetamp_sec(),
+            unix_time: get_unix_timestamp_sec(),
             id: None,
             ua,
             host_url,
             local_debugging,
+            _asn: if local_debugging { 0 } else { req.cf().asn() },
         })
     }
 
@@ -299,7 +301,7 @@ impl<'a> BbsCgiRouter<'a> {
             let hash = hasher.finalize();
             let token = format!("{:x}", hash);
             let auth_code = generate_six_digit_num();
-            let writed_time = get_unix_timetamp_sec().to_string();
+            let writed_time = get_unix_timestamp_sec().to_string();
 
             let authed_token = CreatingAuthedToken {
                 token: &token,
@@ -366,20 +368,13 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         let datetime = get_current_date_time();
-        let id = calculate_trip(&if self.board_id == 1 {
-            format!(
-                "{}:{}",
-                authenticated_user_cookie.clone().origin_ip,
-                datetime.date(),
-            )
-        } else {
-            format!(
-                "{}:{}:{}",
-                authenticated_user_cookie.clone().origin_ip,
-                datetime.date(),
-                self.board_id
-            )
-        })
+        let reduced_ip_addr = get_reduced_ip_addr(&authenticated_user_cookie.clone().origin_ip);
+        let id = calculate_trip(&format!(
+            "{}:{}:{}",
+            reduced_ip_addr,
+            datetime.date(),
+            self.board_id
+        ))
         .chars()
         .take(9)
         .collect::<String>();

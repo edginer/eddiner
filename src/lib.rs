@@ -19,6 +19,7 @@ use worker::*;
 mod authed_cookie;
 mod board;
 pub(crate) mod board_config;
+mod grecaptcha;
 pub(crate) mod inmemory_cache;
 pub mod response;
 pub mod routes;
@@ -27,6 +28,9 @@ mod turnstile;
 mod utils;
 pub(crate) mod repositories {
     pub(crate) mod bbs_repository;
+}
+pub(crate) mod services {
+    pub(crate) mod auth_verification;
 }
 
 // TODO(kenmo-melon): 設定可能に? (コンパイル時定数? wrangler.toml?)
@@ -37,6 +41,12 @@ const SITE_DESCRIPTION: &str = "掲示板";
 fn get_secrets(env: &Env) -> Option<(String, String)> {
     let site_key = env.var("SITE_KEY").ok()?.to_string();
     let secret_key = env.var("SECRET_KEY").ok()?.to_string();
+    Some((site_key, secret_key))
+}
+
+fn get_recaptcha_secrets(env: &Env) -> Option<(String, String)> {
+    let site_key = env.var("RECAPTCHA_SITE_KEY").ok()?.to_string();
+    let secret_key = env.var("RECAPTCHA_SECRET_KEY").ok()?.to_string();
     Some((site_key, secret_key))
 }
 
@@ -93,10 +103,6 @@ fn get_board_info<'a>(env: &Env, board_id: usize, board_key: &'a str) -> Option<
 
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
-    let Some((site_key, secret_key)) = get_secrets(&env) else {
-        return Response::error("internal server error", 500);
-    };
-
     let cache = Cache::default();
     let token_cookie = get_token_cookies(&req);
     let ua = req.headers().get("User-Agent").ok().flatten();
@@ -125,19 +131,33 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 .map_err(|e| Error::RustError(format!("Error in index.rs {}", e)))
         }
         routes::Route::Auth => {
+            let Some((site_key, secret_key)) = get_secrets(&env) else {
+                return Response::error("internal server error", 500);
+            };
+            let Some((recaptcha_site_key, recaptcha_secret_key)) = get_recaptcha_secrets(&env)
+            else {
+                return Response::error("internal server error", 500);
+            };
             if req.method() == Method::Post {
-                route_auth_post(&mut req, &repo, &secret_key).await
+                route_auth_post(&mut req, &repo, &secret_key, &recaptcha_secret_key).await
             } else if req.method() == Method::Get {
-                route_auth_get(&req, &site_key)
+                route_auth_get(&req, &site_key, &recaptcha_site_key)
             } else {
                 Response::error("Bad request", 400)
             }
         }
         routes::Route::AuthCode => {
+            let Some((site_key, secret_key)) = get_secrets(&env) else {
+                return Response::error("internal server error", 500);
+            };
+            let Some((recaptcha_site_key, recaptcha_secret_key)) = get_recaptcha_secrets(&env)
+            else {
+                return Response::error("internal server error", 500);
+            };
             if req.method() == Method::Post {
-                route_auth_code_post(&mut req, &repo, &secret_key).await
+                route_auth_code_post(&mut req, &repo, &secret_key, &recaptcha_secret_key).await
             } else if req.method() == Method::Get {
-                route_auth_code_get(&site_key)
+                route_auth_code_get(&site_key, &recaptcha_site_key)
             } else {
                 Response::error("Bad request", 400)
             }

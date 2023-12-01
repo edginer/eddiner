@@ -73,7 +73,7 @@ pub fn shift_jis_url_encodeded_body_to_vec(data: &str) -> Result<HashMap<&str, S
         .collect::<Result<HashMap<_, _>, ()>>()
 }
 
-pub fn get_unix_timetamp_sec() -> u64 {
+pub fn get_unix_timestamp_sec() -> u64 {
     Date::now().as_millis() / 1000
 }
 
@@ -183,6 +183,34 @@ pub fn generate_six_digit_num() -> String {
     let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(unix_ts_to_bytes(milli));
     let num = rng.gen_range(0..1000000);
     format!("{:06}", num)
+}
+
+pub fn equals_ip_addr(a: &str, b: &str) -> bool {
+    if a.contains(':') && b.contains(':') {
+        // IPv6
+        let a = a.split(':').collect::<Vec<_>>();
+        let b = b.split(':').collect::<Vec<_>>();
+        a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]
+    } else {
+        // IPv4
+        a == b
+    }
+}
+
+pub fn get_reduced_ip_addr(ip_addr: &str) -> String {
+    if ip_addr.contains(':') {
+        // IPv6
+        let ip_addrs = ip_addr.split(':').collect::<Vec<_>>();
+        match ip_addrs.as_slice() {
+            [ip1, ip2, ip3, ip4, ..] => {
+                format!("{ip1}:{ip2}:{ip3}:{ip4}")
+            }
+            _ => ip_addr.to_string(),
+        }
+    } else {
+        // IPv4
+        ip_addr.to_string()
+    }
 }
 
 #[cfg(test)]
