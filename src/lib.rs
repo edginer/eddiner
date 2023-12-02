@@ -24,6 +24,7 @@ pub(crate) mod inmemory_cache;
 pub mod response;
 pub mod routes;
 mod thread;
+mod tinker;
 mod turnstile;
 mod utils;
 pub(crate) mod repositories {
@@ -55,6 +56,17 @@ fn get_token_cookies(req: &Request) -> Option<String> {
     let cookie_str = req.headers().get("Cookie").ok()??;
     for cookie in Cookie::split_parse(cookie_str).flatten() {
         if cookie.name() == "edge-token" {
+            return Some(cookie.value().to_string());
+        }
+    }
+    None
+}
+
+/// Find `tinker-token` in cookies
+fn get_tinker_token_cookies(req: &Request) -> Option<String> {
+    let cookie_str = req.headers().get("Cookie").ok()??;
+    for cookie in Cookie::split_parse(cookie_str).flatten() {
+        if cookie.name() == "tinker-token" {
             return Some(cookie.value().to_string());
         }
     }
@@ -166,6 +178,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if req.method() != Method::Post {
                 return Response::error("Bad request", 400);
             }
+            let tinker_token_cookie = get_tinker_token_cookies(&req);
             route_bbs_cgi(
                 &mut req,
                 &env,
@@ -173,6 +186,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 ua,
                 &repo,
                 token_cookie.as_deref(),
+                tinker_token_cookie.as_deref(),
             )
             .await
         }

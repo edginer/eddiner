@@ -32,6 +32,7 @@ regex-lite = "0.1.0"
 anyhow = "1.0.75"
 tokio = { version = "1.34.0", features = ["macros"], default-features = false }
 tokio-macros = { version = "2.2.0" }
+jwt-simple = "0.12.1"
 
 [dev-dependencies]
 criterion = { version = "0.5" }
