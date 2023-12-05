@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use base64::{engine::general_purpose, Engine};
+use jwt_simple::claims::Claims;
 use jwt_simple::prelude::{HS256Key, MACLike};
 use md5::{Digest, Md5};
 use pwhash::unix;
@@ -436,16 +437,14 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         let tinker = if let (Some(tinker), Some(hs256_key)) = (tinker, hs256_key) {
-            let Ok(tinker) =
-                hs256_key.authenticate(jwt_simple::claims::Claims::with_custom_claims(
-                    tinker.clone(),
-                    jwt_simple::prelude::Duration::new(60 * 60 * 24 * 365, 0),
-                ))
-            else {
-                return Response::error("internal server error".to_string(), 500);
-            };
-
-            Some(tinker)
+            if let Ok(tinker) = hs256_key.authenticate(Claims::with_custom_claims(
+                tinker.clone(),
+                jwt_simple::prelude::Duration::new(60 * 60 * 24 * 365, 0),
+            )) {
+                Some(tinker)
+            } else {
+                None
+            }
         } else {
             None
         };

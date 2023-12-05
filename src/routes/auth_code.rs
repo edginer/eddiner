@@ -1,7 +1,12 @@
+use base64::Engine;
+use jwt_simple::{
+    algorithms::{HS256Key, MACLike},
+    claims::Claims,
+};
 use worker::*;
 
 use crate::{
-    repositories::bbs_repository::BbsRepository, services::auth_verification,
+    repositories::bbs_repository::BbsRepository, services::auth_verification, tinker::Tinker,
     utils::get_unix_timestamp_sec,
 };
 
@@ -22,6 +27,7 @@ pub async fn route_auth_code_post(
     repo: &BbsRepository<'_>,
     secret_key: &str,
     g_recaptcha_secret_key: &str,
+    tinker_secret: Option<&str>,
 ) -> Result<Response> {
     let Ok(body) = req.form_data().await else {
         return Response::error("Bad request", 400);
@@ -86,7 +92,48 @@ pub async fn route_auth_code_post(
             return Response::error("internal server error: DB", 500);
         }
 
-        Response::from_html(AUTH_SUCCESSFUL_HTML.replace("{token}", &authed_cookie.cookie))
+        Response::from_html(AUTH_SUCCESSFUL_HTML.replace("{token}", &authed_cookie.cookie)).map(
+            |mut r| {
+                let hs256_key = if let Some(tinker_secret) = tinker_secret {
+                    if let Ok(key) =
+                        base64::engine::general_purpose::STANDARD.decode(tinker_secret.as_bytes())
+                    {
+                        Some(HS256Key::from_bytes(&key))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let tinker = if let Some(hs256_key) = hs256_key {
+                    if let Ok(tinker) = hs256_key.authenticate(Claims::with_custom_claims(
+                        Tinker::new(authed_cookie.cookie.clone()),
+                        jwt_simple::prelude::Duration::new(60 * 60 * 24 * 365, 0),
+                    )) {
+                        Some(tinker)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let _ = r.headers_mut().append(
+                    "Set-Cookie",
+                    &format!(
+                        "edge-token={}; Max-Age=31536000; Path=/",
+                        authed_cookie.cookie,
+                    ),
+                );
+                if let Some(tinker) = tinker {
+                    let _ = r.headers_mut().append(
+                        "Set-Cookie",
+                        &format!("tinker-token={tinker}; Max-Age=31536000; Path=/"),
+                    );
+                }
+                r
+            },
+        )
     } else {
         Response::from_html(AUTH_FAILED_HTML.replace("{reason}", "Cloudflareの認証に失敗しました"))
             .map(|r| r.with_status(400))

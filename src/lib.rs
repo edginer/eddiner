@@ -167,7 +167,15 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 return Response::error("internal server error", 500);
             };
             if req.method() == Method::Post {
-                route_auth_code_post(&mut req, &repo, &secret_key, &recaptcha_secret_key).await
+                let tinker_secret = env.var("TINKER_SECRET").ok().map(|x| x.to_string());
+                route_auth_code_post(
+                    &mut req,
+                    &repo,
+                    &secret_key,
+                    &recaptcha_secret_key,
+                    tinker_secret.as_deref(),
+                )
+                .await
             } else if req.method() == Method::Get {
                 route_auth_code_get(&site_key, &recaptcha_site_key)
             } else {
