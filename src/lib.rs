@@ -19,14 +19,19 @@ use worker::*;
 mod authed_cookie;
 mod board;
 pub(crate) mod board_config;
+mod grecaptcha;
 pub(crate) mod inmemory_cache;
 pub mod response;
 pub mod routes;
 mod thread;
+mod tinker;
 mod turnstile;
 mod utils;
 pub(crate) mod repositories {
     pub(crate) mod bbs_repository;
+}
+pub(crate) mod services {
+    pub(crate) mod auth_verification;
 }
 
 // TODO(kenmo-melon): 設定可能に? (コンパイル時定数? wrangler.toml?)
@@ -40,11 +45,28 @@ fn get_secrets(env: &Env) -> Option<(String, String)> {
     Some((site_key, secret_key))
 }
 
+fn get_recaptcha_secrets(env: &Env) -> Option<(String, String)> {
+    let site_key = env.var("RECAPTCHA_SITE_KEY").ok()?.to_string();
+    let secret_key = env.var("RECAPTCHA_SECRET_KEY").ok()?.to_string();
+    Some((site_key, secret_key))
+}
+
 /// Find `edge-token` in cookies
 fn get_token_cookies(req: &Request) -> Option<String> {
     let cookie_str = req.headers().get("Cookie").ok()??;
     for cookie in Cookie::split_parse(cookie_str).flatten() {
         if cookie.name() == "edge-token" {
+            return Some(cookie.value().to_string());
+        }
+    }
+    None
+}
+
+/// Find `tinker-token` in cookies
+fn get_tinker_token_cookies(req: &Request) -> Option<String> {
+    let cookie_str = req.headers().get("Cookie").ok()??;
+    for cookie in Cookie::split_parse(cookie_str).flatten() {
+        if cookie.name() == "tinker-token" {
             return Some(cookie.value().to_string());
         }
     }
@@ -93,10 +115,6 @@ fn get_board_info<'a>(env: &Env, board_id: usize, board_key: &'a str) -> Option<
 
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
-    let Some((site_key, secret_key)) = get_secrets(&env) else {
-        return Response::error("internal server error", 500);
-    };
-
     let cache = Cache::default();
     let token_cookie = get_token_cookies(&req);
     let ua = req.headers().get("User-Agent").ok().flatten();
@@ -125,19 +143,41 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 .map_err(|e| Error::RustError(format!("Error in index.rs {}", e)))
         }
         routes::Route::Auth => {
+            let Some((site_key, secret_key)) = get_secrets(&env) else {
+                return Response::error("internal server error", 500);
+            };
+            let Some((recaptcha_site_key, recaptcha_secret_key)) = get_recaptcha_secrets(&env)
+            else {
+                return Response::error("internal server error", 500);
+            };
             if req.method() == Method::Post {
-                route_auth_post(&mut req, &repo, &secret_key).await
+                route_auth_post(&mut req, &repo, &secret_key, &recaptcha_secret_key).await
             } else if req.method() == Method::Get {
-                route_auth_get(&req, &site_key)
+                route_auth_get(&req, &site_key, &recaptcha_site_key)
             } else {
                 Response::error("Bad request", 400)
             }
         }
         routes::Route::AuthCode => {
+            let Some((site_key, secret_key)) = get_secrets(&env) else {
+                return Response::error("internal server error", 500);
+            };
+            let Some((recaptcha_site_key, recaptcha_secret_key)) = get_recaptcha_secrets(&env)
+            else {
+                return Response::error("internal server error", 500);
+            };
             if req.method() == Method::Post {
-                route_auth_code_post(&mut req, &repo, &secret_key).await
+                let tinker_secret = env.var("TINKER_SECRET").ok().map(|x| x.to_string());
+                route_auth_code_post(
+                    &mut req,
+                    &repo,
+                    &secret_key,
+                    &recaptcha_secret_key,
+                    tinker_secret.as_deref(),
+                )
+                .await
             } else if req.method() == Method::Get {
-                route_auth_code_get(&site_key)
+                route_auth_code_get(&site_key, &recaptcha_site_key)
             } else {
                 Response::error("Bad request", 400)
             }
@@ -146,6 +186,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             if req.method() != Method::Post {
                 return Response::error("Bad request", 400);
             }
+            let tinker_token_cookie = get_tinker_token_cookies(&req);
             route_bbs_cgi(
                 &mut req,
                 &env,
@@ -153,6 +194,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 ua,
                 &repo,
                 token_cookie.as_deref(),
+                tinker_token_cookie.as_deref(),
             )
             .await
         }

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use base64::{engine::general_purpose, Engine};
+use jwt_simple::claims::Claims;
+use jwt_simple::prelude::{HS256Key, MACLike};
 use md5::{Digest, Md5};
 use pwhash::unix;
 use regex_lite::Regex;
@@ -11,9 +13,10 @@ use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip, n_recent_auth}
 use crate::repositories::bbs_repository::{
     BbsRepository, CreatingAuthedToken, CreatingRes, CreatingThread,
 };
+use crate::tinker::Tinker;
 use crate::utils::{
     self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
-    get_unix_timetamp_sec, response_shift_jis_text_html,
+    get_reduced_ip_addr, get_unix_timestamp_sec, response_shift_jis_text_html,
 };
 
 const WRITING_SUCCESS_HTML_RESPONSE: &str =
@@ -162,11 +165,13 @@ pub async fn route_bbs_cgi(
     ua: Option<String>,
     repo: &BbsRepository<'_>,
     token_cookie: Option<&str>,
+    tinker_token: Option<&str>,
 ) -> Result<Response> {
-    let router = match BbsCgiRouter::new(req, env, repo, board_keys, token_cookie, ua).await {
-        Ok(router) => router,
-        Err(resp) => return resp,
-    };
+    let router =
+        match BbsCgiRouter::new(req, env, repo, board_keys, token_cookie, tinker_token, ua).await {
+            Ok(router) => router,
+            Err(resp) => return resp,
+        };
 
     router.route().await
 }
@@ -175,12 +180,15 @@ struct BbsCgiRouter<'a> {
     repo: &'a BbsRepository<'a>,
     board_id: usize,
     token_cookie: Option<&'a str>,
+    tinker_token: Option<&'a str>,
+    tinker_secret: Option<String>,
     ip_addr: String,
     form: BbsCgiForm,
     unix_time: u64,
     id: Option<String>,
     ua: Option<String>,
     host_url: String,
+    _asn: u32,
     local_debugging: bool,
 }
 
@@ -191,6 +199,7 @@ impl<'a> BbsCgiRouter<'a> {
         repo: &'a BbsRepository<'a>,
         board_keys: &'a HashMap<String, usize>,
         token_cookie: Option<&'a str>,
+        tinker_token: Option<&'a str>,
         ua: Option<String>,
     ) -> std::result::Result<BbsCgiRouter<'a>, Result<Response>> {
         let (ip_addr, local_debugging) =
@@ -230,17 +239,22 @@ impl<'a> BbsCgiRouter<'a> {
             ));
         };
 
+        let tinker_secret = env.var("TINKER_SECRET").ok().map(|x| x.to_string());
+
         Ok(Self {
             repo,
             board_id: *board_id,
             token_cookie,
+            tinker_token,
+            tinker_secret,
             ip_addr,
             form,
-            unix_time: get_unix_timetamp_sec(),
+            unix_time: get_unix_timestamp_sec(),
             id: None,
             ua,
             host_url,
             local_debugging,
+            _asn: if local_debugging { 0 } else { req.cf().asn() },
         })
     }
 
@@ -299,7 +313,7 @@ impl<'a> BbsCgiRouter<'a> {
             let hash = hasher.finalize();
             let token = format!("{:x}", hash);
             let auth_code = generate_six_digit_num();
-            let writed_time = get_unix_timetamp_sec().to_string();
+            let writed_time = get_unix_timestamp_sec().to_string();
 
             let authed_token = CreatingAuthedToken {
                 token: &token,
@@ -338,6 +352,37 @@ impl<'a> BbsCgiRouter<'a> {
             return resp;
         };
 
+        let hs256_key = if let Some(tinker_secret) = &self.tinker_secret {
+            if let Ok(key) =
+                base64::engine::general_purpose::STANDARD.decode(tinker_secret.as_bytes())
+            {
+                Some(HS256Key::from_bytes(&key))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let mut tinker = if let Some(hs256_key) = &hs256_key {
+            Some(if let Some(tinker_tk) = self.tinker_token {
+                let tinker = hs256_key.verify_token::<Tinker>(tinker_tk, None);
+
+                match tinker {
+                    Ok(tinker)
+                        if tinker.custom.authed_token == authenticated_user_cookie.cookie =>
+                    {
+                        tinker.custom
+                    }
+                    _ => Tinker::new(authenticated_user_cookie.cookie.clone()),
+                }
+            } else {
+                Tinker::new(authenticated_user_cookie.cookie.clone())
+            })
+        } else {
+            None
+        };
+
         // Reject too fast reponses by cookie here
         if maybe_reject_cookie(&authenticated_user_cookie.cookie)? {
             return response_shift_jis_text_html(
@@ -366,25 +411,43 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         let datetime = get_current_date_time();
-        let id = calculate_trip(&if self.board_id == 1 {
-            format!(
-                "{}:{}",
-                authenticated_user_cookie.clone().origin_ip,
-                datetime.date(),
-            )
-        } else {
-            format!(
-                "{}:{}:{}",
-                authenticated_user_cookie.clone().origin_ip,
-                datetime.date(),
-                self.board_id
-            )
-        })
+        let reduced_ip_addr = get_reduced_ip_addr(&authenticated_user_cookie.clone().origin_ip);
+        let id = calculate_trip(&format!(
+            "{}:{}:{}",
+            reduced_ip_addr,
+            datetime.date(),
+            self.board_id
+        ))
         .chars()
         .take(9)
         .collect::<String>();
 
         self.id = Some(id);
+
+        if let Some(tinker) = tinker.as_mut() {
+            tinker.wrote_count += 1;
+            tinker.last_wrote_at = self.unix_time;
+            if self.form.is_thread {
+                tinker.created_thread_count += 1;
+            }
+            if tinker.last_level_up_at + 60 * 60 * 23 < self.unix_time {
+                tinker.level += 1;
+                tinker.last_level_up_at = self.unix_time;
+            }
+        }
+
+        let tinker = if let (Some(tinker), Some(hs256_key)) = (tinker, hs256_key) {
+            if let Ok(tinker) = hs256_key.authenticate(Claims::with_custom_claims(
+                tinker.clone(),
+                jwt_simple::prelude::Duration::new(60 * 60 * 24 * 365, 0),
+            )) {
+                Some(tinker)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let result = if self.form.is_thread {
             self.create_thread(&authenticated_user_cookie.cookie).await
@@ -392,13 +455,14 @@ impl<'a> BbsCgiRouter<'a> {
             self.create_response(&authenticated_user_cookie.cookie)
                 .await
         };
+
         if is_cap {
             let tk = authenticated_user_cookie.cookie;
             result.map(|mut x| {
                 x.headers_mut()
                     .append(
                         "Set-Cookie",
-                        &format!("edge-token={}; Max-Age=31536000; Path=/", tk),
+                        &format!("edge-token={tk}; Max-Age=31536000; Path=/"),
                     )
                     .unwrap();
                 x
@@ -406,6 +470,17 @@ impl<'a> BbsCgiRouter<'a> {
         } else {
             result
         }
+        .map(|mut x| {
+            if let Some(tinker) = tinker {
+                x.headers_mut()
+                    .append(
+                        "Set-Cookie",
+                        &format!("tinker-token={tinker}; Max-Age=31536000; Path=/"),
+                    )
+                    .unwrap();
+            }
+            x
+        })
     }
 
     /// Returns the number of recent responses per second for this token.

@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use worker::*;
 
 use crate::{
-    repositories::bbs_repository::BbsRepository, turnstile::TurnstileResponse,
-    utils::get_unix_timetamp_sec,
+    repositories::bbs_repository::BbsRepository,
+    services::auth_verification,
+    utils::{equals_ip_addr, get_unix_timestamp_sec},
 };
 
 const AUTH_GETTING_HTML: &str = include_str!("templates/auth_getting.html");
@@ -15,6 +14,7 @@ pub async fn route_auth_post(
     req: &mut Request,
     repo: &BbsRepository<'_>,
     secret_key: &str,
+    g_recaptcha_secret_key: &str,
 ) -> Result<Response> {
     let Ok(body) = req.form_data().await else {
         return Response::error("Bad request", 400);
@@ -23,32 +23,27 @@ pub async fn route_auth_post(
     let Some(FormEntry::Field(cf_turnstile_response)) = body.get("cf-turnstile-response") else {
         return Response::error("Bad request", 400);
     };
+    let Some(FormEntry::Field(grecaptcha_response_tk)) = body.get("g-recaptcha-response") else {
+        return Response::error("Bad request", 400);
+    };
     let Ok(Some(ip)) = req.headers().get("CF-Connecting-IP") else {
         return Response::error("Bad request", 400);
     };
 
-    // Validate the token by calling the `/siteverify` API.
-    // `secret_key` here is set using Wrangler secrets
-    let mut form_data = HashMap::new();
-    form_data.insert("secret", secret_key);
-    form_data.insert("response", &cf_turnstile_response);
-    form_data.insert("remoteip", &ip);
+    let result = match auth_verification::verify_auth_resp(
+        secret_key,
+        Some(g_recaptcha_secret_key),
+        &ip,
+        &cf_turnstile_response,
+        Some(&grecaptcha_response_tk),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
 
-    let Ok(response) = reqwest::Client::new()
-        .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
-        .form(&form_data)
-        .send()
-        .await
-    else {
-        return Response::error("internal server error - reqwest cloudflare", 500);
-    };
-    let Ok(text) = response.text().await else {
-        return Response::error("internal server error - cloudflare response", 500);
-    };
-    let Ok(result) = serde_json::from_str::<TurnstileResponse>(&text) else {
-        return Response::error(format!("internal server error - json parsing {text}"), 500);
-    };
-    if result.success {
+    if result {
         let Some(FormEntry::Field(edge_token)) = body.get("edge-token") else {
             return Response::error("Bad request", 400);
         };
@@ -56,15 +51,16 @@ pub async fn route_auth_post(
         let Ok(Some(result)) = repo.get_authed_token(&edge_token).await else {
             return Response::error("internal server error: DB get authed token", 500);
         };
-        if result.origin_ip != ip {
-            return Response::from_html(
-                AUTH_FAILED_HTML.replace("{reason}", "IPが一致していません"),
-            )
+        if !equals_ip_addr(&result.origin_ip, &ip) {
+            return Response::from_html(AUTH_FAILED_HTML.replace(
+                "{reason}",
+                &format!("IPが一致していません: {} <-> {}", result.origin_ip, ip),
+            ))
             .map(|r| r.with_status(400));
         }
 
         if repo
-            .update_authed_status(&edge_token, &get_unix_timetamp_sec().to_string())
+            .update_authed_status(&edge_token, &get_unix_timestamp_sec().to_string())
             .await
             .is_err()
         {
@@ -78,7 +74,11 @@ pub async fn route_auth_post(
     }
 }
 
-pub fn route_auth_get(req: &Request, site_key: &str) -> Result<Response> {
+pub fn route_auth_get(
+    req: &Request,
+    site_key: &str,
+    g_recaptcha_site_key: &str,
+) -> Result<Response> {
     let url = req.url()?;
     // get y in x=y
     let Some(Some(token)) = url.query().map(|e| e.split('=').nth(1)) else {
@@ -88,6 +88,7 @@ pub fn route_auth_get(req: &Request, site_key: &str) -> Result<Response> {
     Response::from_html(
         AUTH_GETTING_HTML
             .replace("{site_key}", site_key)
-            .replace("{token}", token),
+            .replace("{token}", token)
+            .replace("{recaptcha_site_key}", g_recaptcha_site_key),
     )
 }
