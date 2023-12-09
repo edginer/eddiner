@@ -43,7 +43,11 @@ pub async fn route_dat(
                     .unwrap()
                 };
 
-                if ua.contains("Siki") || ua.contains("twinkle") {
+                if ua.contains("Siki")
+                    || ua.contains("twinkle")
+                    || ua.contains("Xeno")
+                    || ua.contains("mae2c")
+                {
                     return Response::redirect(generate_url(thread_info.thread_id));
                 }
                 if let Some(mate_idx) = ua.find("2chMate/0.8.10") {
@@ -123,13 +127,13 @@ pub async fn route_dat(
             } else {
                 response_shift_jis_text_plain_with_cache(
                     body,
-                    if thread.active == 0 { 86400 } else { 1 },
+                    if thread.active == 0 { 3600 } else { 1 },
                 )
             }
         }
         _ => response_shift_jis_text_plain_with_cache(
             body,
-            if thread.active == 0 { 86400 } else { 1 },
+            if thread.active == 0 { 3600 } else { 1 },
         ),
     }
 }

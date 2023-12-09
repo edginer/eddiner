@@ -97,6 +97,9 @@ pub fn response_shift_jis_text_plain_with_cache(
         1 => {
             let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
         }
+        3600 => {
+            let _ = resp.headers_mut().append("Cache-Control", "s-maxage=3600");
+        }
         86400 => {
             let _ = resp.headers_mut().append("Cache-Control", "s-maxage=86400");
         }
