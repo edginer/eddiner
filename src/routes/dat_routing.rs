@@ -31,52 +31,18 @@ pub async fn route_dat(
     };
 
     let Some(thread) = thread else {
-        return if let Some(bucket) = bucket {
-            if let Some(ua) = ua {
-                let generate_url = |thread_id: &str| {
-                    Url::from_str(&format!(
-                        "http://bbs.eddibb.cc/liveedge/kako/{}/{}/{}.dat",
-                        &thread_id[0..4],
-                        &thread_id[0..5],
-                        thread_id
-                    ))
-                    .unwrap()
-                };
-
-                if ua.contains("Siki")
-                    || ua.contains("twinkle")
-                    || ua.contains("Xeno")
-                    || ua.contains("mae2c")
-                {
-                    return Response::redirect(generate_url(thread_info.thread_id));
-                }
-                if let Some(mate_idx) = ua.find("2chMate/0.8.10") {
-                    let sub_version = ua
-                        .chars()
-                        .skip(mate_idx + "2chMate/0.8.10.".len())
-                        .take_while(|x| x.is_numeric())
-                        .collect::<String>();
-                    let sub_version = sub_version.parse::<u32>().unwrap_or(0);
-                    if sub_version >= 174 {
-                        return Response::redirect(generate_url(thread_info.thread_id));
-                    }
-                }
-            }
-
-            let log = bucket
-                .get(format!("liveedge/dat/{}.dat", thread_info.thread_id))
-                .execute()
-                .await?;
-
-            let Some(log) = log else {
-                return Response::error("Not found - dat", 404);
+        return if bucket.is_some() {
+            let generate_url = |thread_id: &str| {
+                Url::from_str(&format!(
+                    "http://bbs.eddibb.cc/{}/kako/{}/{}/{}.dat",
+                    thread_info.board_conf.board_key,
+                    &thread_id[0..4],
+                    &thread_id[0..5],
+                    thread_id
+                ))
+                .unwrap()
             };
-            let Some(log_body) = log.body() else {
-                return Response::error("Internal server error - dat bucket", 500);
-            };
-
-            let log_text = log_body.text().await?;
-            response_shift_jis_text_plain_with_cache(log_text, 86400)
+            return Response::redirect(generate_url(thread_info.thread_id));
         } else {
             Response::error("Not found - dat", 404)
         };
