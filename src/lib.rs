@@ -19,6 +19,7 @@ use worker::*;
 mod authed_cookie;
 mod board;
 pub(crate) mod board_config;
+mod cap;
 mod grecaptcha;
 pub(crate) mod inmemory_cache;
 pub mod response;

@@ -9,10 +9,12 @@ use regex_lite::Regex;
 use sha1::Sha1;
 use worker::*;
 
+use crate::get_board_info;
 use crate::inmemory_cache::{maybe_reject_cookie, maybe_reject_ip, n_recent_auth};
 use crate::repositories::bbs_repository::{
     BbsRepository, CreatingAuthedToken, CreatingRes, CreatingThread,
 };
+use crate::thread::MetadentType;
 use crate::tinker::Tinker;
 use crate::utils::{
     self, generate_six_digit_num, get_current_date_time, get_current_date_time_string,
@@ -32,7 +34,9 @@ const REQUEST_AUTHENTICATION_LOCAL: &str =
 const RECENT_RES_SECONDS: u64 = 40;
 const N_MAX_RECENT_AUTH_PER_IP: u32 = 3;
 
-struct TokenRemover {
+const CAP_ID_NONE: &str = "????";
+
+pub struct TokenRemover {
     regex: Regex,
 }
 
@@ -127,8 +131,13 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     let name = if name_segments.len() == 1 {
         let token_remover = TokenRemover::new();
         let name = token_remover.remove(name.to_string());
-        sanitize(&name).replace('◆', "◇").replace("&#9670;", "◇")
+        sanitize(&name)
+            .replace('◆', "◇")
+            .replace("&#9670;", "◇")
+            .replace('★', "☆")
+            .replace("&#9733;", "☆")
     } else {
+        // TODO: smell
         let trip = sanitize(&name_segments[1..].concat())
             .replace('◆', "◇")
             .replace("&#9670;", "◇");
@@ -188,7 +197,8 @@ struct BbsCgiRouter<'a> {
     id: Option<String>,
     ua: Option<String>,
     host_url: String,
-    _asn: u32,
+    asn: u32,
+    default_name: String,
     local_debugging: bool,
 }
 
@@ -238,6 +248,12 @@ impl<'a> BbsCgiRouter<'a> {
                     .replace("{reason}", "書き込もうとしている板が存在しません"),
             ));
         };
+        let Some(board_conf) = get_board_info(env, *board_id, &form.board_key) else {
+            return Err(response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE
+                    .replace("{reason}", "書き込もうとしている板が存在しません"),
+            ));
+        };
 
         let tinker_secret = env.var("TINKER_SECRET").ok().map(|x| x.to_string());
 
@@ -248,13 +264,14 @@ impl<'a> BbsCgiRouter<'a> {
             tinker_token,
             tinker_secret,
             ip_addr,
+            default_name: board_conf.default_name.clone(),
             form,
             unix_time: get_unix_timestamp_sec(),
             id: None,
             ua,
             host_url,
             local_debugging,
-            _asn: if local_debugging { 0 } else { req.cf().asn() },
+            asn: if local_debugging { 0 } else { req.cf().asn() },
         })
     }
 
@@ -266,9 +283,27 @@ impl<'a> BbsCgiRouter<'a> {
             );
         }
 
+        let moderator_cap = if let Some(cap) = &self.form.cap {
+            if self.token_cookie.is_some() && cap.starts_with('@') {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(cap.as_str()[1..].as_bytes());
+                let result = hasher.finalize();
+                let hash = format!("{:x}", result);
+
+                self.repo
+                    .get_cap_by_password_hash(&hash)
+                    .await
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let (token_cookie_candidate, is_cap) = match (self.token_cookie, self.form.cap.as_deref()) {
-            (Some(_), Some(cap)) => (Some(cap), true),
-            (Some(cookie), None) => (Some(cookie), false),
+            (Some(cookie), _) => (Some(cookie), false),
             (None, Some(cap)) => (Some(cap), true),
             (None, None) => (None, false),
         };
@@ -422,7 +457,11 @@ impl<'a> BbsCgiRouter<'a> {
         .take(9)
         .collect::<String>();
 
-        self.id = Some(id);
+        self.id = if moderator_cap.is_some() {
+            Some(CAP_ID_NONE.to_string())
+        } else {
+            Some(id)
+        };
 
         if let Some(tinker) = tinker.as_mut() {
             tinker.wrote_count += 1;
@@ -436,7 +475,7 @@ impl<'a> BbsCgiRouter<'a> {
             }
         }
 
-        let tinker = if let (Some(tinker), Some(hs256_key)) = (tinker, hs256_key) {
+        let tinker_tk = if let (Some(tinker), Some(hs256_key)) = (&tinker, hs256_key) {
             if let Ok(tinker) = hs256_key.authenticate(Claims::with_custom_claims(
                 tinker.clone(),
                 jwt_simple::prelude::Duration::new(60 * 60 * 24 * 365, 0),
@@ -449,10 +488,16 @@ impl<'a> BbsCgiRouter<'a> {
             None
         };
 
+        if let Some(moderator_cap) = moderator_cap {
+            self.form.name.push_str("★ ");
+            self.form.name.push_str(&moderator_cap.cap_name);
+        }
+
         let result = if self.form.is_thread {
-            self.create_thread(&authenticated_user_cookie.cookie).await
+            self.create_thread(&authenticated_user_cookie.cookie, &tinker)
+                .await
         } else {
-            self.create_response(&authenticated_user_cookie.cookie)
+            self.create_response(&authenticated_user_cookie.cookie, &tinker)
                 .await
         };
 
@@ -471,7 +516,7 @@ impl<'a> BbsCgiRouter<'a> {
             result
         }
         .map(|mut x| {
-            if let Some(tinker) = tinker {
+            if let Some(tinker) = tinker_tk {
                 x.headers_mut()
                     .append(
                         "Set-Cookie",
@@ -517,7 +562,7 @@ impl<'a> BbsCgiRouter<'a> {
         Ok(ts_min)
     }
 
-    async fn create_thread(self, cookie: &str) -> Result<Response> {
+    async fn create_thread(self, cookie: &str, tinker: &Option<Tinker>) -> Result<Response> {
         let BbsCgiForm {
             subject,
             name,
@@ -526,18 +571,44 @@ impl<'a> BbsCgiRouter<'a> {
             ..
         } = &self.form;
 
+        let (body_opt, mt) = if body.contains("!metadent:vvv:") {
+            (
+                Some(body.replace("!metadent:vvv:", "!metadent:vvv - configured")),
+                MetadentType::VVVerbose,
+            )
+        } else if body.contains("!metadent:vv:") {
+            (
+                Some(body.replace("!metadent:vv:", "!metadent:vv - configured")),
+                MetadentType::VVerbose,
+            )
+        } else if body.contains("!metadent:v:") {
+            (
+                Some(body.replace("!metadent:v:", "!metadent:v - configured")),
+                MetadentType::Verbose,
+            )
+        } else {
+            (None, MetadentType::None)
+        };
+
+        let name = self.generate_name_with_metadent(name, &mt, tinker);
+
         let unix_time = self.unix_time.to_string();
         let thread = CreatingThread {
             title: subject.as_ref().unwrap(),
             unix_time: &unix_time,
-            body,
-            name,
+            body: if let Some(body) = &body_opt {
+                body
+            } else {
+                body
+            },
+            name: &name,
             mail,
             date_time: &get_current_date_time_string(true),
             author_ch5id: self.id.as_ref().unwrap(),
             authed_token: cookie,
             ip_addr: &self.ip_addr,
             board_id: self.board_id,
+            metadent: mt,
         };
 
         match self.repo.create_thread(thread).await {
@@ -561,7 +632,7 @@ impl<'a> BbsCgiRouter<'a> {
         }
     }
 
-    async fn create_response(self, cookie: &str) -> Result<Response> {
+    async fn create_response(self, cookie: &str, tinker: &Option<Tinker>) -> Result<Response> {
         let BbsCgiForm {
             name,
             mail,
@@ -570,10 +641,33 @@ impl<'a> BbsCgiRouter<'a> {
             ..
         } = &self.form;
 
+        let Ok(thread_info) = self
+            .repo
+            .get_thread(self.board_id, thread_id.as_ref().unwrap())
+            .await
+        else {
+            return Response::error("internal server error - get thread", 500);
+        };
+
+        let thread_info = if let Some(thread_info) = thread_info {
+            if thread_info.active == 0 {
+                return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
+                    "{reason}",
+                    "スレッドストッパーが働いたみたいなので書き込めません",
+                ));
+            }
+            thread_info
+        } else {
+            return response_shift_jis_text_html(
+                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "そのようなスレは存在しません"),
+            );
+        };
+
+        let name = self.generate_name_with_metadent(name, &thread_info.metadent_type(), tinker);
         let res = CreatingRes {
             unix_time: &self.unix_time.to_string(),
             body,
-            name,
+            name: &name,
             mail,
             date_time: &get_current_date_time_string(true),
             authed_token: cookie,
@@ -583,29 +677,56 @@ impl<'a> BbsCgiRouter<'a> {
             thread_id: thread_id.as_ref().unwrap(),
         };
 
-        let Ok(thread_info) = self
-            .repo
-            .get_thread(self.board_id, thread_id.as_ref().unwrap())
-            .await
-        else {
-            return Response::error("internal server error - get thread", 500);
-        };
-        if let Some(thread_info) = thread_info {
-            if thread_info.active == 0 {
-                return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
-                    "{reason}",
-                    "スレッドストッパーが働いたみたいなので書き込めません",
-                ));
-            }
-        } else {
-            return response_shift_jis_text_html(
-                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "そのようなスレは存在しません"),
-            );
-        }
-
         match self.repo.create_response(res).await {
             Ok(_) => response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string()),
             Err(e) => Response::error(format!("internal server error - {e}"), 500),
+        }
+    }
+
+    fn generate_name_with_metadent(
+        &self,
+        name: &str,
+        metadent_type: &MetadentType,
+        tinker: &Option<Tinker>,
+    ) -> String {
+        match (tinker, metadent_type) {
+            (Some(_), MetadentType::None) | (None, _) => name.to_string(),
+            (Some(tinker), MetadentType::Verbose) => {
+                let mut name = if name.is_empty() {
+                    self.default_name.clone()
+                } else {
+                    name.to_string()
+                };
+                name.push_str(&format!(" </b>(L{})<b>", tinker.level));
+                name
+            }
+            (Some(tinker), MetadentType::VVerbose | MetadentType::VVVerbose) => {
+                let mut name = if name.is_empty() {
+                    self.default_name.clone()
+                } else {
+                    name.to_string()
+                };
+                let metadent = generate_meta_ident(
+                    self.asn,
+                    &self.ip_addr,
+                    self.ua.as_ref().unwrap_or(&"Unknown".to_string()),
+                    generate_date_seed(),
+                );
+                name.push_str(&format!(
+                    " </b>(L{} {})<b>",
+                    tinker.level,
+                    if let Some(id) = &self.id {
+                        if id == CAP_ID_NONE {
+                            "????-????"
+                        } else {
+                            &metadent
+                        }
+                    } else {
+                        &metadent
+                    }
+                ));
+                name
+            }
         }
     }
 }
@@ -649,6 +770,92 @@ pub fn calculate_trip(target: &str) -> String {
         let result = unix::crypt(bytes.as_slice(), salt).unwrap();
         result[3..].to_string()
     }
+}
+
+// for !metadent:vv, !metadent:vvv (vvv is currently disabled)
+// (XXYY-zABB):
+//   XX is generated from asn number ((asn + date_seed) % (len(a-zA-Z0-9))^2 to 2 byte char array to string)
+//   YY is generated from ip_addr (if v6, only use first 4 segments)
+//   z is 4 if v4, 6 if v6 (this segment does not use date_seed)
+//   A is generated from type of Browser
+//   BB is generated from UA
+fn generate_meta_ident(asn: u32, ip_addr: &str, ua: &str, seed: u32) -> String {
+    let alpha_char_62_to_ascii = |x: u8| match x {
+        0..=9 => x + b'0',
+        10..=35 => (x - 10) + b'A',
+        36..=61 => (x - 36) + b'a',
+        _ => b'0',
+    };
+    let num_to_2byte_chars = |x: u32| {
+        let (first, second) = ((x / 62) as u8, (x % 62) as u8);
+        vec![first, second]
+            .into_iter()
+            .map(alpha_char_62_to_ascii)
+            .map(|x| x as char)
+            .collect::<String>()
+    };
+
+    let xx = (asn + seed) % (62 * 62);
+    let xx = num_to_2byte_chars(xx);
+
+    let is_v6 = ip_addr.contains(':');
+    let yy = ip_addr
+        .split(if is_v6 { ':' } else { '.' })
+        .take(4)
+        .map(|x| {
+            if is_v6 {
+                if x.is_empty() {
+                    0u64
+                } else {
+                    u64::from_str_radix(x, 16).unwrap_or(0)
+                }
+            } else {
+                x.parse::<u64>().unwrap_or(0)
+            }
+        })
+        .sum::<u64>()
+        + seed as u64;
+
+    let yy = (yy % (62 * 62)) as u32;
+    let yy = num_to_2byte_chars(yy);
+    let z = if is_v6 { 6 } else { 4 };
+
+    let a = if ua.contains("Mate") {
+        0
+    } else if ua.contains("twinkle") {
+        1
+    } else if ua.contains("mae") {
+        2
+    } else if ua.contains("Siki") {
+        3
+    } else if ua.contains("Xeno") {
+        4
+    } else if ua.contains("ThreadMaster") {
+        5
+    } else {
+        6
+    } + seed;
+
+    let a = (a % 62) as u8;
+    let a = alpha_char_62_to_ascii(a) as char;
+
+    let mut hasher = Md5::new();
+    hasher.update(ua);
+    let bb = hasher.finalize();
+
+    let bb = bb
+        .iter()
+        .map(|x| *x as char)
+        .filter(|x| x.is_ascii_alphanumeric())
+        .take(2)
+        .collect::<String>();
+
+    format!("{xx}{yy}-{z}{a}{bb}",)
+}
+
+fn generate_date_seed() -> u32 {
+    let n = get_unix_timestamp_sec();
+    ((n / (60 * 60 * 24) / 7) % i32::max_value() as u64) as u32
 }
 
 #[cfg(test)]
@@ -714,6 +921,25 @@ mod tests {
 
         for (case, expected) in test_cases.into_iter() {
             assert_eq!(expected, case.validate());
+        }
+    }
+
+    #[test]
+    fn test_metadent() {
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let seed = ((n / (60 * 60 * 24) / 7) % i32::max_value() as u64) as u32;
+        let cands = [
+            (17676, "127.0.0.1", "Mate/1.0.0"),
+            (9605, "91b4:320f:123a:ff", "Xeno/1.0.0"),
+            (2516, "866c:0fa3::f3:aa", "Mate/2.0.123"),
+        ];
+
+        for c in cands.iter() {
+            let result = generate_meta_ident(c.0, c.1, c.2, seed);
+            println!("{result}");
         }
     }
 }

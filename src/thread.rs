@@ -11,6 +11,38 @@ pub struct Thread {
     pub non_auth_thread: u32,
     pub archived: u32,
     pub active: u32,
+    pub metadent: Option<String>,
+    pub no_pool: u32,
+}
+
+impl Thread {
+    pub fn metadent_type(&self) -> MetadentType {
+        match self.metadent.as_deref() {
+            Some("v") => MetadentType::Verbose,
+            Some("vv") => MetadentType::VVVerbose,
+            Some("vvv") => MetadentType::VVVerbose,
+            _ => MetadentType::None,
+        }
+    }
+}
+
+impl From<MetadentType> for Option<&str> {
+    fn from(value: MetadentType) -> Self {
+        match value {
+            MetadentType::None => None,
+            MetadentType::Verbose => Some("v"),
+            MetadentType::VVerbose => Some("vv"),
+            MetadentType::VVVerbose => Some("vvv"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MetadentType {
+    None,
+    Verbose,
+    VVerbose,
+    VVVerbose,
 }
 
 pub trait Ch5ThreadFormatter {
@@ -48,6 +80,8 @@ mod tests {
             non_auth_thread: 0,
             archived: 0,
             active: 1,
+            metadent: None,
+            no_pool: 0,
         }
     }
     #[test]
