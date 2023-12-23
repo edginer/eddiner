@@ -1,6 +1,6 @@
 use worker::D1Database;
 
-use crate::{authed_cookie::AuthedCookie, response::Res};
+use crate::{authed_cookie::AuthedCookie, response::Res, thread::MetadentType};
 
 pub struct BbsRepository<'a> {
     db: &'a D1Database,
@@ -160,12 +160,14 @@ impl BbsRepository<'_> {
     }
 
     pub async fn create_thread(&self, thread: CreatingThread<'_>) -> anyhow::Result<()> {
+        let metadent: Option<&str> = thread.metadent.into();
+        let metadent = metadent.unwrap_or("");
         let th_stmt = self
             .db
             .prepare(
                 "INSERT INTO threads
-                (thread_number, title, response_count, board_id, last_modified, authed_cookie)
-                VALUES (?, ?, 1, ?, ?, ?)",
+                (thread_number, title, response_count, board_id, last_modified, authed_cookie, metadent)
+                VALUES (?, ?, 1, ?, ?, ?, ?)",
             )
             .bind(&[
                 thread.unix_time.into(),
@@ -173,6 +175,7 @@ impl BbsRepository<'_> {
                 thread.board_id.into(),
                 thread.unix_time.into(),
                 thread.authed_token.into(),
+                metadent.into(),
             ]);
 
         let res_stmt = self
@@ -327,6 +330,25 @@ impl BbsRepository<'_> {
             Ok(())
         }
     }
+
+    pub async fn get_cap_by_password_hash(
+        &self,
+        hash: &str,
+    ) -> anyhow::Result<Option<crate::cap::Cap>> {
+        let Ok(stmt) = self
+            .db
+            .prepare("SELECT * FROM caps WHERE cap_password_hash = ?")
+            .bind(&[hash.into()])
+        else {
+            return Err(anyhow::anyhow!("failed to bind hash"));
+        };
+
+        if let Ok(cap) = stmt.first::<crate::cap::Cap>(None).await {
+            Ok(cap)
+        } else {
+            Err(anyhow::anyhow!("failed to fetch cap"))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -354,6 +376,7 @@ pub struct CreatingThread<'a> {
     pub authed_token: &'a str,
     pub ip_addr: &'a str,
     pub board_id: usize,
+    pub metadent: MetadentType,
 }
 
 #[derive(Debug, Clone)]

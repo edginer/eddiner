@@ -5,6 +5,8 @@ use crate::{board_config::BoardConfig, repositories::bbs_repository::BbsReposito
 use minijinja::{context, Environment};
 use worker::{Response, Result};
 
+use super::bbs_cgi::TokenRemover;
+
 const BOARD_HTML: &str = include_str!("templates/board.html");
 const INDEX_HTML: &str = include_str!("templates/index.html");
 const THREAD_HTML: &str = include_str!("templates/thread.html");
@@ -82,9 +84,12 @@ pub(crate) async fn route_thread(
         Err(e) => return Response::error(format!("DB error {}", e), 500),
     };
 
+    let token_remover = TokenRemover::new();
+
     let mut env = Environment::new();
     env.add_template("thread.html", THREAD_HTML)
         .map_err(into_workers_err)?;
+    env.add_filter("remove_token", move |name| token_remover.remove(name));
     let tmpl = env.get_template("thread.html").map_err(into_workers_err)?;
     let html = tmpl
         .render(context!(board, thread, responses))
