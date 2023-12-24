@@ -225,9 +225,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             let bucket = env.bucket("ARCHIVE_BUCKET").ok();
 
-            let range = req.headers().get("Range").ok().flatten();
-            let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
-
             let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned))
             else {
                 return Response::error("internal server error - failed to parse url", 500);
@@ -236,24 +233,19 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Some(board_conf) = get_board_info(&env, board_id, board_key) else {
                 return Response::error("internal server error - failed to load board info", 500);
             };
-            let mut result = route_dat(
+            let result = route_dat(
+                &req,
                 DatRoutingThreadInfo {
                     board_conf: &board_conf,
                     thread_id,
                 },
                 &ua,
-                range,
-                if_modified_since,
                 &repo,
                 &bucket,
                 host_url,
             )
             .await?;
-            if let Ok(result) = result.cloned() {
-                if result.status_code() == 200 {
-                    let _ = cache.put(&req, result).await;
-                }
-            }
+            // NOTE: cache putting is not used here because it's already cached in route_dat
 
             Ok(result)
         }
@@ -283,7 +275,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             };
 
             let log_text = log_body.text().await?;
-            let mut result = response_shift_jis_text_plain_with_cache(log_text, 86400)?;
+            let mut result = response_shift_jis_text_plain_with_cache(&log_text, 86400)?;
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;

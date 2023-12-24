@@ -3,10 +3,8 @@ use std::str::FromStr;
 use worker::*;
 
 use crate::{
-    board_config::BoardConfig,
-    repositories::bbs_repository::BbsRepository,
+    board_config::BoardConfig, repositories::bbs_repository::BbsRepository,
     response::Ch5ResponsesFormatter,
-    utils::{response_shift_jis_text_plain_with_cache, response_shift_jis_with_range},
 };
 
 pub struct DatRoutingThreadInfo<'a> {
@@ -15,14 +13,16 @@ pub struct DatRoutingThreadInfo<'a> {
 }
 
 pub async fn route_dat(
+    req: &Request,
     thread_info: DatRoutingThreadInfo<'_>,
     ua: &Option<String>,
-    range: Option<String>,
-    if_modified_since: Option<String>,
     repo: &BbsRepository<'_>,
     bucket: &Option<Bucket>,
     host: String,
 ) -> Result<Response> {
+    let range = req.headers().get("Range").ok().flatten();
+    let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
+
     let Ok(thread) = repo
         .get_thread(thread_info.board_conf.board_id, thread_info.thread_id)
         .await
@@ -80,8 +80,9 @@ pub async fn route_dat(
     }
 
     let body = responses.format_responses(&thread.title, &thread_info.board_conf.default_name);
+    let sjis_body = encoding_rs::SHIFT_JIS.encode(&body).0.into_owned();
 
-    match (range, ua) {
+    let ranged_sjis_body = match (range, ua) {
         (Some(range), Some(ua)) if !ua.contains("Mate") && !ua.contains("Xeno") => {
             if let Some(range) = range.split('=').nth(1) {
                 let range = range.split('-').collect::<Vec<_>>();
@@ -89,17 +90,56 @@ pub async fn route_dat(
                     return Response::error("Bad request", 400);
                 };
 
-                response_shift_jis_with_range(body, start).map(|x| x.with_status(206))
-            } else {
-                response_shift_jis_text_plain_with_cache(
-                    body,
-                    if thread.active == 0 { 3600 } else { 1 },
+                Some(
+                    sjis_body
+                        .clone()
+                        .into_iter()
+                        .skip(start)
+                        .collect::<Vec<_>>(),
                 )
+            } else {
+                None
             }
         }
-        _ => response_shift_jis_text_plain_with_cache(
-            body,
-            if thread.active == 0 { 3600 } else { 1 },
-        ),
+        _ => None,
+    };
+    let Ok(mut resp) = Response::from_bytes(sjis_body) else {
+        return Response::error("internal server error - converting sjis", 500);
+    };
+
+    let _ = resp.headers_mut().delete("Content-Type");
+    let _ = resp.headers_mut().append("Content-Type", "text/plain");
+    let _ = resp.headers_mut().append(
+        "Cache-Control",
+        if thread.active == 0 {
+            "s-maxage=3600"
+        } else {
+            "s-maxage=1"
+        },
+    );
+
+    if let Some(ranged_resp) = ranged_sjis_body {
+        let Ok(mut ranged_resp) = Response::from_bytes(ranged_resp) else {
+            return Response::error("internal server error - converting sjis", 500);
+        };
+
+        let _ = ranged_resp.headers_mut().delete("Content-Type");
+        let _ = ranged_resp
+            .headers_mut()
+            .append("Content-Type", "text/plain");
+
+        if resp.status_code() == 200 {
+            let _ = Cache::default().put(req, resp).await;
+        }
+
+        Ok(ranged_resp.with_status(206))
+    } else {
+        if let Ok(result) = resp.cloned() {
+            if result.status_code() == 200 {
+                let _ = Cache::default().put(req, result).await;
+            }
+        }
+
+        Ok(resp)
     }
 }

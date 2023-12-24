@@ -9,5 +9,5 @@ pub async fn route_head_txt(board_id: usize, repo: &BbsRepository<'_>) -> Result
         return Response::error("internal server error - failed to find board", 500);
     };
 
-    response_shift_jis_text_plain_with_cache(board_info.local_rule, 3600)
+    response_shift_jis_text_plain_with_cache(&board_info.local_rule, 3600)
 }
