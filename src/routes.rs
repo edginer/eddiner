@@ -56,6 +56,9 @@ pub fn analyze_route<'a>(path: &'a str, board_keys: &'a HashMap<String, usize>) 
         "/auth-code/" | "/auth-code" => Route::AuthCode,
         "/test/bbs.cgi" => Route::BbsCgi,
         path => {
+            if path.len() < 4 {
+                return Route::NotFound;
+            }
             let ext = &path[path.len() - 4..];
             match ext {
                 ".dat" => {

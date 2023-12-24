@@ -114,15 +114,30 @@ fn get_board_info<'a>(env: &Env, board_id: usize, board_key: &'a str) -> Option<
     }
 }
 
+struct DbOrchestrator {
+    infos_db: D1Database,
+    threads_db: D1Database,
+    responses_db: D1Database,
+}
+
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let cache = Cache::default();
     let token_cookie = get_token_cookies(&req);
     let ua = req.headers().get("User-Agent").ok().flatten();
-    let Ok(db) = env.d1("DB") else {
-        return Response::error("internal server error: DB", 500);
+
+    let (infos_db, threads_db, responses_db) = (
+        env.d1("DB").unwrap(),
+        env.d1("DB_THREADS").unwrap(),
+        env.d1("DB_RESPONSES").unwrap(),
+    );
+    let dbo = DbOrchestrator {
+        infos_db,
+        threads_db,
+        responses_db,
     };
-    let repo = BbsRepository::new(&db);
+
+    let repo = BbsRepository::new(&dbo);
     let Some(board_keys) = get_board_keys(&env) else {
         return Response::error(
             "internal server error: failed to load environment settings",
@@ -375,6 +390,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 #[event(scheduled)]
 async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let db = env.d1("DB").unwrap();
+    let threads_db = env.d1("DB_THREADS").unwrap();
 
     db.prepare("UPDATE threads SET archived = 1 WHERE active = 0")
         .run()
@@ -385,10 +401,28 @@ async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
         SELECT thread_number
         FROM threads WHERE board_id = 1 AND archived = 0
-        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 60
+        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 0
     )",
     )
     .run()
     .await
     .unwrap();
+
+    threads_db
+        .prepare("UPDATE threads SET archived = 1 WHERE active = 0")
+        .run()
+        .await
+        .unwrap();
+
+    threads_db
+        .prepare(
+            "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
+        SELECT thread_number
+        FROM threads WHERE board_id = 1 AND archived = 0
+        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 60
+    )",
+        )
+        .run()
+        .await
+        .unwrap();
 }

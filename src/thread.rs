@@ -19,7 +19,7 @@ impl Thread {
     pub fn metadent_type(&self) -> MetadentType {
         match self.metadent.as_deref() {
             Some("v") => MetadentType::Verbose,
-            Some("vv") => MetadentType::VVVerbose,
+            Some("vv") => MetadentType::VVerbose,
             Some("vvv") => MetadentType::VVVerbose,
             _ => MetadentType::None,
         }

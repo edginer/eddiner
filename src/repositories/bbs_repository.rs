@@ -1,14 +1,14 @@
-use worker::D1Database;
+use tokio::join;
 
-use crate::{authed_cookie::AuthedCookie, response::Res, thread::MetadentType};
+use crate::{authed_cookie::AuthedCookie, response::Res, thread::MetadentType, DbOrchestrator};
 
 pub struct BbsRepository<'a> {
-    db: &'a D1Database,
+    dbo: &'a DbOrchestrator,
 }
 
 impl<'a> BbsRepository<'a> {
-    pub fn new(db: &'a D1Database) -> BbsRepository<'a> {
-        BbsRepository { db }
+    pub fn new(dbo: &'a DbOrchestrator) -> BbsRepository<'a> {
+        BbsRepository { dbo }
     }
 }
 
@@ -18,7 +18,8 @@ impl BbsRepository<'_> {
         board_id: usize,
     ) -> anyhow::Result<Option<crate::board::Board>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare("SELECT * FROM boards WHERE id = ?")
             .bind(&[board_id.into()])
         else {
@@ -37,7 +38,8 @@ impl BbsRepository<'_> {
         thread_id: &str,
     ) -> anyhow::Result<Option<crate::thread::Thread>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .threads_db
             .prepare("SELECT * FROM threads WHERE thread_number = ? AND board_id = ?")
             .bind(&[thread_id.into(), board_id.into()])
         else {
@@ -56,7 +58,8 @@ impl BbsRepository<'_> {
         status: ThreadStatus,
     ) -> anyhow::Result<Vec<crate::thread::Thread>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .threads_db
             .prepare(match status {
                 ThreadStatus::Active => "SELECT * FROM threads WHERE board_id = ? AND active = 1",
                 ThreadStatus::Inactive => {
@@ -90,7 +93,8 @@ impl BbsRepository<'_> {
         thread_id: &str,
     ) -> anyhow::Result<Vec<Res>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .responses_db
             .prepare("SELECT * FROM responses WHERE thread_id = ? AND board_id = ?")
             .bind(&[thread_id.into(), board_id.into()])
         else {
@@ -109,7 +113,8 @@ impl BbsRepository<'_> {
         min_timestamp: &str,
     ) -> anyhow::Result<Vec<Res>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .responses_db
             .prepare("SELECT * FROM responses WHERE authed_token = ? AND timestamp > ?")
             .bind(&[authed_token.into(), min_timestamp.to_string().into()])
         else {
@@ -125,7 +130,8 @@ impl BbsRepository<'_> {
 
     pub async fn get_authed_token(&self, token: &str) -> anyhow::Result<Option<AuthedCookie>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare("SELECT * FROM authed_cookies WHERE cookie = ?")
             .bind(&[token.into()])
         else {
@@ -145,7 +151,8 @@ impl BbsRepository<'_> {
         auth_code: &str,
     ) -> anyhow::Result<Option<AuthedCookie>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare("SELECT * FROM authed_cookies WHERE origin_ip = ? AND auth_code = ?")
             .bind(&[ip.into(), auth_code.into()])
         else {
@@ -163,7 +170,8 @@ impl BbsRepository<'_> {
         let metadent: Option<&str> = thread.metadent.into();
         let metadent = metadent.unwrap_or("");
         let th_stmt = self
-            .db
+            .dbo
+            .threads_db
             .prepare(
                 "INSERT INTO threads
                 (thread_number, title, response_count, board_id, last_modified, authed_cookie, metadent)
@@ -179,7 +187,8 @@ impl BbsRepository<'_> {
             ]);
 
         let res_stmt = self
-            .db
+            .dbo
+            .responses_db
             .prepare(
                 "INSERT INTO responses 
                 (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp, board_id)
@@ -218,7 +227,8 @@ impl BbsRepository<'_> {
 
     pub async fn create_response(&self, res: CreatingRes<'_>) -> anyhow::Result<()> {
         let update_th_stmt = self
-            .db
+            .dbo
+            .threads_db
             .prepare(
                 "UPDATE threads SET 
             response_count = response_count + 1,
@@ -236,8 +246,10 @@ impl BbsRepository<'_> {
                 res.thread_id.into(),
                 res.board_id.into(),
             ]);
+
         let res_stmt = self
-            .db
+            .dbo
+            .responses_db
             .prepare(
                 "INSERT INTO responses 
                 (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp, board_id) 
@@ -258,7 +270,10 @@ impl BbsRepository<'_> {
 
         match (update_th_stmt, res_stmt) {
             (Ok(update_th_stmt), Ok(res_stmt)) => {
-                if (self.db.batch(vec![update_th_stmt, res_stmt]).await).is_err() {
+                let (th_res, res_res) = join!(update_th_stmt.run(), res_stmt.run(),);
+                if th_res.is_err() {
+                    Err(anyhow::anyhow!("failed to update thread"))
+                } else if res_res.is_err() {
                     Err(anyhow::anyhow!("failed to insert response"))
                 } else {
                     Ok(())
@@ -273,7 +288,8 @@ impl BbsRepository<'_> {
         authed_token: CreatingAuthedToken<'_>,
     ) -> anyhow::Result<()> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare(
                 "INSERT INTO authed_cookies (cookie, origin_ip, authed, auth_code, writed_time) 
                 VALUES (?, ?, ?, ?, ?)",
@@ -301,7 +317,8 @@ impl BbsRepository<'_> {
         unix_time: &str,
     ) -> anyhow::Result<()> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare("UPDATE authed_cookies SET last_thread_creation = ? WHERE cookie = ?")
             .bind(&[unix_time.into(), token.into()])
         else {
@@ -317,7 +334,8 @@ impl BbsRepository<'_> {
 
     pub async fn update_authed_status(&self, token: &str, authed_time: &str) -> anyhow::Result<()> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare("UPDATE authed_cookies SET authed = ?, authed_time = ? WHERE cookie = ?")
             .bind(&[1.into(), authed_time.into(), token.into()])
         else {
@@ -336,7 +354,8 @@ impl BbsRepository<'_> {
         hash: &str,
     ) -> anyhow::Result<Option<crate::cap::Cap>> {
         let Ok(stmt) = self
-            .db
+            .dbo
+            .infos_db
             .prepare("SELECT * FROM caps WHERE cap_password_hash = ?")
             .bind(&[hash.into()])
         else {

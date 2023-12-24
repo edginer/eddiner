@@ -303,6 +303,15 @@ impl<'a> BbsCgiRouter<'a> {
         };
 
         let (token_cookie_candidate, is_cap) = match (self.token_cookie, self.form.cap.as_deref()) {
+            (_, Some(cap))
+                if self
+                    .ua
+                    .as_ref()
+                    .map(|x| x.contains("BathyScaphe"))
+                    .unwrap_or(false) =>
+            {
+                (Some(cap), true)
+            }
             (Some(cookie), _) => (Some(cookie), false),
             (None, Some(cap)) => (Some(cap), true),
             (None, None) => (None, false),
@@ -469,7 +478,7 @@ impl<'a> BbsCgiRouter<'a> {
             if self.form.is_thread {
                 tinker.created_thread_count += 1;
             }
-            if tinker.last_level_up_at + 60 * 60 * 23 < self.unix_time {
+            if tinker.last_level_up_at + 60 * 60 * 23 < self.unix_time && tinker.level < 20 {
                 tinker.level += 1;
                 tinker.last_level_up_at = self.unix_time;
             }
@@ -700,7 +709,33 @@ impl<'a> BbsCgiRouter<'a> {
                 name.push_str(&format!(" </b>(L{})<b>", tinker.level));
                 name
             }
-            (Some(tinker), MetadentType::VVerbose | MetadentType::VVVerbose) => {
+            (Some(_), MetadentType::VVerbose) => {
+                let mut name = if name.is_empty() {
+                    self.default_name.clone()
+                } else {
+                    name.to_string()
+                };
+                let metadent = generate_meta_ident(
+                    self.asn,
+                    &self.ip_addr,
+                    self.ua.as_ref().unwrap_or(&"Unknown".to_string()),
+                    generate_date_seed(),
+                );
+                name.push_str(&format!(
+                    " </b>({})<b>",
+                    if let Some(id) = &self.id {
+                        if id == CAP_ID_NONE {
+                            "????-????"
+                        } else {
+                            &metadent
+                        }
+                    } else {
+                        &metadent
+                    }
+                ));
+                name
+            }
+            (Some(tinker), MetadentType::VVVerbose) => {
                 let mut name = if name.is_empty() {
                     self.default_name.clone()
                 } else {
