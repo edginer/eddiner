@@ -91,10 +91,11 @@ impl BbsRepository<'_> {
         &self,
         board_id: usize,
         thread_id: &str,
+        modulo: usize,
     ) -> anyhow::Result<Vec<Res>> {
         let Ok(stmt) = self
             .dbo
-            .responses_db
+            .get_responses_db(modulo)
             .prepare("SELECT * FROM responses WHERE thread_id = ? AND board_id = ?")
             .bind(&[thread_id.into(), board_id.into()])
         else {
@@ -112,20 +113,22 @@ impl BbsRepository<'_> {
         authed_token: &str,
         min_timestamp: &str,
     ) -> anyhow::Result<Vec<Res>> {
-        let Ok(stmt) = self
-            .dbo
-            .responses_db
-            .prepare("SELECT * FROM responses WHERE authed_token = ? AND timestamp > ?")
-            .bind(&[authed_token.into(), min_timestamp.to_string().into()])
-        else {
-            return Err(anyhow::anyhow!("failed to bind authed_token and timestamp"));
-        };
-
-        if let Ok(responses) = stmt.all().await.and_then(|res| res.results::<Res>()) {
-            Ok(responses)
-        } else {
-            Err(anyhow::anyhow!("failed to fetch responses"))
+        let mut responses = Vec::new();
+        for m in &self.dbo.responses_db {
+            let Ok(stmt) = m
+                .prepare("SELECT * FROM responses WHERE authed_token = ? AND timestamp > ?")
+                .bind(&[authed_token.into(), min_timestamp.into()])
+            else {
+                return Err(anyhow::anyhow!("failed to bind authed_token and timestamp"));
+            };
+            if let Ok(resps) = stmt.all().await.and_then(|res| res.results::<Res>()) {
+                responses.extend(resps);
+            } else {
+                return Err(anyhow::anyhow!("failed to fetch responses"));
+            }
         }
+
+        Ok(responses)
     }
 
     pub async fn get_authed_token(&self, token: &str) -> anyhow::Result<Option<AuthedCookie>> {
@@ -169,13 +172,14 @@ impl BbsRepository<'_> {
     pub async fn create_thread(&self, thread: CreatingThread<'_>) -> anyhow::Result<()> {
         let metadent: Option<&str> = thread.metadent.into();
         let metadent = metadent.unwrap_or("");
+        let modulo = thread.unix_time.parse::<usize>().unwrap() % self.dbo.responses_db.len();
         let th_stmt = self
             .dbo
             .threads_db
             .prepare(
                 "INSERT INTO threads
-                (thread_number, title, response_count, board_id, last_modified, authed_cookie, metadent)
-                VALUES (?, ?, 1, ?, ?, ?, ?)",
+                (thread_number, title, response_count, board_id, last_modified, authed_cookie, metadent, modulo)
+                VALUES (?, ?, 1, ?, ?, ?, ?, ?)",
             )
             .bind(&[
                 thread.unix_time.into(),
@@ -184,11 +188,12 @@ impl BbsRepository<'_> {
                 thread.unix_time.into(),
                 thread.authed_token.into(),
                 metadent.into(),
+                modulo.into(),
             ]);
 
         let res_stmt = self
             .dbo
-            .responses_db
+            .get_responses_db(modulo)
             .prepare(
                 "INSERT INTO responses 
                 (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp, board_id)
@@ -225,7 +230,7 @@ impl BbsRepository<'_> {
         }
     }
 
-    pub async fn create_response(&self, res: CreatingRes<'_>) -> anyhow::Result<()> {
+    pub async fn create_response(&self, res: CreatingRes<'_>, modulo: usize) -> anyhow::Result<()> {
         let update_th_stmt = self
             .dbo
             .threads_db
@@ -249,7 +254,7 @@ impl BbsRepository<'_> {
 
         let res_stmt = self
             .dbo
-            .responses_db
+            .get_responses_db(modulo)
             .prepare(
                 "INSERT INTO responses 
                 (name, mail, date, author_id, body, thread_id, ip_addr, authed_token, timestamp, board_id) 

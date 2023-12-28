@@ -63,7 +63,11 @@ pub async fn route_dat(
     }
 
     let mut responses = match repo
-        .get_responses(thread_info.board_conf.board_id, thread_info.thread_id)
+        .get_responses(
+            thread_info.board_conf.board_id,
+            thread_info.thread_id,
+            thread.modulo as usize,
+        )
         .await
     {
         Ok(o) => o,

@@ -117,7 +117,17 @@ fn get_board_info<'a>(env: &Env, board_id: usize, board_key: &'a str) -> Option<
 struct DbOrchestrator {
     infos_db: D1Database,
     threads_db: D1Database,
-    responses_db: D1Database,
+    responses_db: Vec<D1Database>,
+}
+
+impl DbOrchestrator {
+    pub fn get_responses_db(&self, modulo: usize) -> &D1Database {
+        &self.responses_db[if modulo >= self.responses_db.len() {
+            0
+        } else {
+            modulo
+        }]
+    }
 }
 
 #[event(fetch)]
@@ -129,7 +139,11 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let (infos_db, threads_db, responses_db) = (
         env.d1("DB").unwrap(),
         env.d1("DB_THREADS").unwrap(),
-        env.d1("DB_RESPONSES").unwrap(),
+        vec![
+            env.d1("DB_RESPONSES").unwrap(),
+            env.d1("DB_RESPONSES_2").unwrap(),
+            env.d1("DB_RESPONSES_3").unwrap(),
+        ],
     );
     let dbo = DbOrchestrator {
         infos_db,
@@ -381,32 +395,23 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 #[event(scheduled)]
 async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
-    let db = env.d1("DB").unwrap();
-    let threads_db = env.d1("DB_THREADS").unwrap();
+    let dbo = DbOrchestrator {
+        infos_db: env.d1("DB").unwrap(),
+        threads_db: env.d1("DB_THREADS").unwrap(),
+        responses_db: vec![
+            env.d1("DB_RESPONSES").unwrap(),
+            env.d1("DB_RESPONSES_2").unwrap(),
+            env.d1("DB_RESPONSES_3").unwrap(),
+        ],
+    };
 
-    db.prepare("UPDATE threads SET archived = 1 WHERE active = 0")
-        .run()
-        .await
-        .unwrap();
-
-    db.prepare(
-        "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
-        SELECT thread_number
-        FROM threads WHERE board_id = 1 AND archived = 0
-        ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 0
-    )",
-    )
-    .run()
-    .await
-    .unwrap();
-
-    threads_db
+    dbo.threads_db
         .prepare("UPDATE threads SET archived = 1 WHERE active = 0")
         .run()
         .await
         .unwrap();
 
-    threads_db
+    dbo.threads_db
         .prepare(
             "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
         SELECT thread_number
@@ -417,4 +422,38 @@ async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         .run()
         .await
         .unwrap();
+
+    let repo = BbsRepository::new(&dbo);
+    let threads = repo
+        .get_threads(1, repositories::bbs_repository::ThreadStatus::Unarchived)
+        .await
+        .unwrap();
+
+    let targets = threads
+        .iter()
+        .filter(|x| x.response_count >= 100)
+        .collect::<Vec<_>>();
+
+    console_debug!("targets.len(): {}", targets.len());
+
+    for th in targets {
+        let (responses, thread) = tokio::join!(
+            repo.get_responses(1, &th.thread_number, th.modulo as usize),
+            repo.get_thread(1, &th.thread_number),
+        );
+        let thread = thread.unwrap().unwrap();
+        let responses = responses.unwrap();
+        console_log!("thread_number: {}", th.thread_number);
+        console_log!("thread.response_count: {}", thread.response_count);
+        console_log!("responses.len(): {}", responses.len());
+        if thread.response_count != responses.len() as u32 {
+            dbo.threads_db
+                .prepare("UPDATE threads SET response_count = ? WHERE thread_number = ?")
+                .bind(&[responses.len().into(), th.thread_number.clone().into()])
+                .unwrap()
+                .run()
+                .await
+                .unwrap();
+        }
+    }
 }

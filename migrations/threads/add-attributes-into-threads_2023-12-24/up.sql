@@ -1,0 +1,4 @@
+ALTER TABLE
+    threads
+ADD
+    COLUMN modulo INTEGER NOT NULL DEFAULT 0;

@@ -200,6 +200,7 @@ struct BbsCgiRouter<'a> {
     asn: u32,
     default_name: String,
     local_debugging: bool,
+    using_hard_min_recent_res_span_cap: bool,
 }
 
 impl<'a> BbsCgiRouter<'a> {
@@ -226,6 +227,12 @@ impl<'a> BbsCgiRouter<'a> {
                     ));
                 }
             };
+
+        let using_hard_min_recent_res_span_cap = env
+            .var("HARD_MIN_RECENT_RES_SPAN_CAP")
+            .ok()
+            .map(|x| x.to_string() == "true")
+            .unwrap_or(false);
 
         let Ok(req_bytes) = req.bytes().await else {
             return Err(Response::error("Bad request - read bytes", 400));
@@ -272,6 +279,7 @@ impl<'a> BbsCgiRouter<'a> {
             host_url,
             local_debugging,
             asn: if local_debugging { 0 } else { req.cf().asn() },
+            using_hard_min_recent_res_span_cap,
         })
     }
 
@@ -433,17 +441,21 @@ impl<'a> BbsCgiRouter<'a> {
                 WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
             );
         }
-        let min_recent_res_span = match self
-            .get_min_recent_res_span(&authenticated_user_cookie.cookie)
-            .await
-        {
-            Ok(min_recent_res_span) => min_recent_res_span,
-            Err(e) => return Response::error(e, 500),
-        };
-        if min_recent_res_span < 5 {
-            return response_shift_jis_text_html(
-                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
-            );
+
+        if self.using_hard_min_recent_res_span_cap {
+            let min_recent_res_span = match self
+                .get_min_recent_res_span(&authenticated_user_cookie.cookie)
+                .await
+            {
+                Ok(min_recent_res_span) => min_recent_res_span,
+                Err(e) => return Response::error(e, 500),
+            };
+            if min_recent_res_span < 5 {
+                return response_shift_jis_text_html(
+                    WRITING_FAILED_HTML_RESPONSE
+                        .replace("{reason}", "5秒以内の連続投稿はできません"),
+                );
+            }
         }
 
         if let Some(s) = &authenticated_user_cookie.last_thread_creation {
@@ -474,6 +486,14 @@ impl<'a> BbsCgiRouter<'a> {
 
         if let Some(tinker) = tinker.as_mut() {
             tinker.wrote_count += 1;
+
+            if self.unix_time - tinker.last_wrote_at <= 5 {
+                return response_shift_jis_text_html(
+                    WRITING_FAILED_HTML_RESPONSE
+                        .replace("{reason}", "5秒以内の連続投稿はできません"),
+                );
+            }
+
             tinker.last_wrote_at = self.unix_time;
             if self.form.is_thread {
                 tinker.created_thread_count += 1;
@@ -686,7 +706,11 @@ impl<'a> BbsCgiRouter<'a> {
             thread_id: thread_id.as_ref().unwrap(),
         };
 
-        match self.repo.create_response(res).await {
+        match self
+            .repo
+            .create_response(res, thread_info.modulo as usize)
+            .await
+        {
             Ok(_) => response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string()),
             Err(e) => Response::error(format!("internal server error - {e}"), 500),
         }

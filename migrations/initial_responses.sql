@@ -24,8 +24,6 @@ VALUES
         '127.0.0.1'
     );
 
-CREATE INDEX threads_authed_token_idx ON responses(authed_token);
-
 CREATE INDEX responses_thread_number_idx ON responses(thread_id);
 
 CREATE INDEX responses_authed_token_idx ON responses(authed_token);
