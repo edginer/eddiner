@@ -121,7 +121,7 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     };
 
     let subject = if is_thread {
-        Some(sanitize(&result["subject"]).clone())
+        Some(sanitize_thread_name(&result["subject"]).clone())
     } else {
         None
     };
@@ -800,6 +800,88 @@ fn sanitize(input: &str) -> String {
         .replace("&#10;", "")
 }
 
+fn sanitize_thread_name(input: &str) -> String {
+    let sanitized = sanitize(input);
+    // Delete all of semicolon closing \n character references
+    let re = Regex::new(r"&#([Xx]0*[aA]|0*10);").unwrap();
+    let rn_sanitized = re.replace_all(&sanitized, "");
+
+    sanitize_non_semi_closing_num_char_refs(&rn_sanitized)
+}
+
+// Delete all of non-semicolon closing numeric character references
+fn sanitize_non_semi_closing_num_char_refs(target: &str) -> String {
+    let mut sanitized = Vec::new();
+    let mut ampersand_used = -1;
+    let mut total_removed_len = 0;
+    enum NumRefKind {
+        Undef, // this state is only cause after reading "&#"
+        Hex,
+        Dec,
+    }
+    let mut in_num_ref = None;
+    for (i, c) in target.chars().enumerate() {
+        if let Some(kind) = &in_num_ref {
+            if c == ';' {
+                in_num_ref = None;
+                sanitized.push(c);
+            } else {
+                match kind {
+                    NumRefKind::Undef => {
+                        match c {
+                            'x' | 'X' => in_num_ref = Some(NumRefKind::Hex),
+                            '0'..='9' => in_num_ref = Some(NumRefKind::Dec),
+                            _ => in_num_ref = None,
+                        };
+                        sanitized.push(c);
+                    }
+                    NumRefKind::Hex => match c {
+                        '0'..='9' | 'a'..='f' | 'A'..='F' => sanitized.push(c),
+                        _ => {
+                            // invalid non-semicolon closing numeric character references
+                            in_num_ref = None;
+                            sanitized =
+                                sanitized[0..ampersand_used as usize - total_removed_len].to_vec();
+                            total_removed_len += i - ampersand_used as usize;
+                            sanitized.push(c);
+                            if c == '&' {
+                                ampersand_used = i as isize;
+                            }
+                        }
+                    },
+                    NumRefKind::Dec => match c {
+                        '0'..='9' => sanitized.push(c),
+                        _ => {
+                            // invalid non-semicolon closing numeric character references
+                            in_num_ref = None;
+                            sanitized =
+                                sanitized[0..ampersand_used as usize - total_removed_len].to_vec();
+                            total_removed_len += i - ampersand_used as usize;
+                            sanitized.push(c);
+                            if c == '&' {
+                                ampersand_used = i as isize;
+                            }
+                        }
+                    },
+                }
+            }
+        } else {
+            sanitized.push(c);
+            if c == '&' {
+                ampersand_used = i as isize;
+            } else if ampersand_used == (i as isize - 1) && c == '#' {
+                in_num_ref = Some(NumRefKind::Undef);
+            }
+        }
+    }
+
+    if in_num_ref.is_some() {
+        sanitized = sanitized[0..ampersand_used as usize - total_removed_len].to_vec();
+    }
+
+    sanitized.into_iter().collect::<String>()
+}
+
 // &str is utf-8 bytes
 pub fn calculate_trip(target: &str) -> String {
     let bytes = encoding_rs::SHIFT_JIS.encode(target).0.into_owned();
@@ -999,6 +1081,57 @@ mod tests {
         for c in cands.iter() {
             let result = generate_meta_ident(c.0, c.1, c.2, seed);
             println!("{result}");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_non_semi_closing_num_char_refs() {
+        let test_cases = [
+            // Test case 1
+            (
+                "This is a text with &#32; spaces.",
+                "This is a text with &#32; spaces.",
+            ),
+            // Test case 2
+            (
+                "&#32;Hello, &#xa;world!&#65;",
+                "&#32;Hello, &#xa;world!&#65;",
+            ),
+            // Test case 3
+            (
+                "This is an invalid numeric reference: &#32.",
+                "This is an invalid numeric reference: .",
+            ),
+            // Test case 4
+            (
+                "Invalid numeric references: &#32&#65&#xa.",
+                "Invalid numeric references: .",
+            ),
+            // Test case 5
+            (
+                "Mix of valid and invalid: &#32&#65;&#xa&#98aてすと&#99;.",
+                "Mix of valid and invalid: &#65;aてすと&#99;.",
+            ),
+            // Test case 6
+            (
+                "Mix of valid and invalid: &#32Hello, &#xa;&#65;world!",
+                "Mix of valid and invalid: Hello, &#xa;&#65;world!",
+            ),
+            // Test case 7
+            ("", ""),
+            // Test case 8
+            (
+                "No numeric references here. だよね",
+                "No numeric references here. だよね",
+            ),
+            // Test case 9
+            ("&#32&#xa", ""),
+            // Test case 10
+            ("&#32;&#xa;", "&#32;&#xa;"),
+        ];
+
+        for (input, expected) in test_cases.iter() {
+            assert_eq!(*expected, sanitize_non_semi_closing_num_char_refs(input));
         }
     }
 }

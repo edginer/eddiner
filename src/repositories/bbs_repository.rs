@@ -1,6 +1,61 @@
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicU64, OnceLock, RwLock},
+};
+
 use tokio::join;
+use worker::{console_log, Date};
 
 use crate::{authed_cookie::AuthedCookie, response::Res, thread::MetadentType, DbOrchestrator};
+
+const RESPONSES_CACHE_EXPIRE_TIME: u64 = 1000; // same as s-maxage=1
+const CLEAR_RESPONSES_CACHE_INTERVAL: u64 = 1000 * 60 * 5;
+
+type ResponsesCacheMap = HashMap<(usize, String, usize), (u64, Vec<Res>)>;
+
+fn get_responses_cache_map() -> &'static RwLock<ResponsesCacheMap> {
+    static RESPONSES_CACHE: OnceLock<RwLock<ResponsesCacheMap>> = OnceLock::new();
+    RESPONSES_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn put_responses_cache(board_id: usize, thread_id: &str, modulo: usize, responses: Vec<Res>) {
+    let current_millis = Date::now().as_millis();
+    static LAST_REFRESHED: OnceLock<AtomicU64> = OnceLock::new();
+    let last_refreshed = LAST_REFRESHED.get_or_init(|| AtomicU64::new(current_millis));
+
+    let mut lock = get_responses_cache_map().write().unwrap();
+    if current_millis - last_refreshed.load(std::sync::atomic::Ordering::Relaxed)
+        > CLEAR_RESPONSES_CACHE_INTERVAL
+    {
+        lock.clear();
+        last_refreshed.store(current_millis, std::sync::atomic::Ordering::Relaxed);
+        console_log!("cache refreshed");
+    }
+
+    lock.insert(
+        (board_id, thread_id.to_string(), modulo),
+        (current_millis, responses),
+    );
+}
+
+fn get_responses_cache(board_id: usize, thread_id: &str, modulo: usize) -> Option<Vec<Res>> {
+    let t = {
+        let lock = get_responses_cache_map().read().unwrap();
+        lock.get(&(board_id, thread_id.to_string(), modulo))
+            .cloned()
+    };
+    if let Some((timestamp, responses)) = t {
+        if Date::now().as_millis() - timestamp > RESPONSES_CACHE_EXPIRE_TIME {
+            console_log!("cache expired {board_id}/{thread_id} ({modulo})");
+            None
+        } else {
+            console_log!("cache hit {board_id}/{thread_id} ({modulo})");
+            Some(responses)
+        }
+    } else {
+        None
+    }
+}
 
 pub struct BbsRepository<'a> {
     dbo: &'a DbOrchestrator,
@@ -93,6 +148,10 @@ impl BbsRepository<'_> {
         thread_id: &str,
         modulo: usize,
     ) -> anyhow::Result<Vec<Res>> {
+        let cached_resps = get_responses_cache(board_id, thread_id, modulo);
+        if let Some(resps) = cached_resps {
+            return Ok(resps);
+        }
         let Ok(stmt) = self
             .dbo
             .get_responses_db(modulo)
@@ -105,6 +164,7 @@ impl BbsRepository<'_> {
             return Err(anyhow::anyhow!("failed to fetch responses"));
         };
 
+        put_responses_cache(board_id, thread_id, modulo, responses.clone());
         Ok(responses)
     }
 
