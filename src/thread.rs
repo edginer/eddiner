@@ -13,13 +13,14 @@ pub struct Thread {
     pub active: u32,
     pub metadent: Option<String>,
     pub no_pool: u32,
+    pub modulo: u32,
 }
 
 impl Thread {
     pub fn metadent_type(&self) -> MetadentType {
         match self.metadent.as_deref() {
             Some("v") => MetadentType::Verbose,
-            Some("vv") => MetadentType::VVVerbose,
+            Some("vv") => MetadentType::VVerbose,
             Some("vvv") => MetadentType::VVVerbose,
             _ => MetadentType::None,
         }
@@ -82,6 +83,7 @@ mod tests {
             active: 1,
             metadent: None,
             no_pool: 0,
+            modulo: 0,
         }
     }
     #[test]

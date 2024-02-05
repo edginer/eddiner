@@ -55,5 +55,5 @@ BBS_USE_VIPQ2=16
                 ",
     );
 
-    response_shift_jis_text_plain_with_cache(builder, 86400)
+    response_shift_jis_text_plain_with_cache(&builder, 86400)
 }

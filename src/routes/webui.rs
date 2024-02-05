@@ -79,7 +79,10 @@ pub(crate) async fn route_thread(
         Ok(None) => return Response::error("internal server error", 500),
         Err(e) => return Response::error(format!("DB error {}", e), 500),
     };
-    let responses = match repo.get_responses(1, &thread_id).await {
+    let responses = match repo
+        .get_responses(board.board_id, &thread_id, thread.modulo as usize)
+        .await
+    {
         Ok(responses) => responses,
         Err(e) => return Response::error(format!("DB error {}", e), 500),
     };

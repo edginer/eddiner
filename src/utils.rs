@@ -77,8 +77,8 @@ pub fn get_unix_timestamp_sec() -> u64 {
     Date::now().as_millis() / 1000
 }
 
-pub fn response_shift_jis_text_plain(body: String) -> worker::Result<Response> {
-    let data = encoding_rs::SHIFT_JIS.encode(&body).0.into_owned();
+pub fn response_shift_jis_text_plain(body: &str) -> worker::Result<Response> {
+    let data = encoding_rs::SHIFT_JIS.encode(body).0.into_owned();
     let Ok(mut resp) = Response::from_bytes(data) else {
         return Response::error("internal server error - converting sjis", 500);
     };
@@ -88,7 +88,7 @@ pub fn response_shift_jis_text_plain(body: String) -> worker::Result<Response> {
 }
 
 pub fn response_shift_jis_text_plain_with_cache(
-    body: String,
+    body: &str,
     ttl: usize,
 ) -> worker::Result<Response> {
     let mut resp = response_shift_jis_text_plain(body)?;
@@ -109,19 +109,6 @@ pub fn response_shift_jis_text_plain_with_cache(
         }
     }
 
-    Ok(resp)
-}
-
-pub fn response_shift_jis_with_range(body: String, start_range: usize) -> worker::Result<Response> {
-    let data = encoding_rs::SHIFT_JIS.encode(&body).0.into_owned();
-    let Ok(mut resp) = Response::from_bytes(data.into_iter().skip(start_range).collect::<Vec<_>>())
-    else {
-        return Response::error("internal server error - converting sjis", 500);
-    };
-    let _ = resp.headers_mut().delete("Content-Type");
-    let _ = resp.headers_mut().append("Content-Type", "text/plain");
-    // NOTE: In Cloudflare Cache API, this header is nonsense because range request is not cached.
-    let _ = resp.headers_mut().append("Cache-Control", "s-maxage=1");
     Ok(resp)
 }
 

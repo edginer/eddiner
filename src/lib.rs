@@ -114,15 +114,44 @@ fn get_board_info<'a>(env: &Env, board_id: usize, board_key: &'a str) -> Option<
     }
 }
 
+struct DbOrchestrator {
+    infos_db: D1Database,
+    threads_db: D1Database,
+    responses_db: Vec<D1Database>,
+}
+
+impl DbOrchestrator {
+    pub fn get_responses_db(&self, modulo: usize) -> &D1Database {
+        &self.responses_db[if modulo >= self.responses_db.len() {
+            0
+        } else {
+            modulo
+        }]
+    }
+}
+
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let cache = Cache::default();
     let token_cookie = get_token_cookies(&req);
     let ua = req.headers().get("User-Agent").ok().flatten();
-    let Ok(db) = env.d1("DB") else {
-        return Response::error("internal server error: DB", 500);
+
+    let (infos_db, threads_db, responses_db) = (
+        env.d1("DB").unwrap(),
+        env.d1("DB_THREADS").unwrap(),
+        vec![
+            env.d1("DB_RESPONSES").unwrap(),
+            env.d1("DB_RESPONSES_2").unwrap(),
+            env.d1("DB_RESPONSES_3").unwrap(),
+        ],
+    );
+    let dbo = DbOrchestrator {
+        infos_db,
+        threads_db,
+        responses_db,
     };
-    let repo = BbsRepository::new(&db);
+
+    let repo = BbsRepository::new(&dbo);
     let Some(board_keys) = get_board_keys(&env) else {
         return Response::error(
             "internal server error: failed to load environment settings",
@@ -210,9 +239,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             let bucket = env.bucket("ARCHIVE_BUCKET").ok();
 
-            let range = req.headers().get("Range").ok().flatten();
-            let if_modified_since = req.headers().get("If-Modified-Since").ok().flatten();
-
             let Ok(Some(host_url)) = req.url().map(|url| url.host_str().map(ToOwned::to_owned))
             else {
                 return Response::error("internal server error - failed to parse url", 500);
@@ -221,24 +247,19 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let Some(board_conf) = get_board_info(&env, board_id, board_key) else {
                 return Response::error("internal server error - failed to load board info", 500);
             };
-            let mut result = route_dat(
+            let result = route_dat(
+                &req,
                 DatRoutingThreadInfo {
                     board_conf: &board_conf,
                     thread_id,
                 },
                 &ua,
-                range,
-                if_modified_since,
                 &repo,
                 &bucket,
                 host_url,
             )
             .await?;
-            if let Ok(result) = result.cloned() {
-                if result.status_code() == 200 {
-                    let _ = cache.put(&req, result).await;
-                }
-            }
+            // NOTE: cache putting is not used here because it's already cached in route_dat
 
             Ok(result)
         }
@@ -268,7 +289,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             };
 
             let log_text = log_body.text().await?;
-            let mut result = response_shift_jis_text_plain_with_cache(log_text, 86400)?;
+            let mut result = response_shift_jis_text_plain_with_cache(&log_text, 86400)?;
             if let Ok(result) = result.cloned() {
                 if result.status_code() == 200 {
                     let _ = cache.put(&req, result).await;
@@ -374,21 +395,65 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 #[event(scheduled)]
 async fn scheduled(_req: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
-    let db = env.d1("DB").unwrap();
+    let dbo = DbOrchestrator {
+        infos_db: env.d1("DB").unwrap(),
+        threads_db: env.d1("DB_THREADS").unwrap(),
+        responses_db: vec![
+            env.d1("DB_RESPONSES").unwrap(),
+            env.d1("DB_RESPONSES_2").unwrap(),
+            env.d1("DB_RESPONSES_3").unwrap(),
+        ],
+    };
 
-    db.prepare("UPDATE threads SET archived = 1 WHERE active = 0")
+    dbo.threads_db
+        .prepare("UPDATE threads SET archived = 1 WHERE active = 0")
         .run()
         .await
         .unwrap();
 
-    db.prepare(
-        "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
+    dbo.threads_db
+        .prepare(
+            "UPDATE threads SET archived = 1, active = 0 WHERE thread_number IN (
         SELECT thread_number
         FROM threads WHERE board_id = 1 AND archived = 0
         ORDER BY CAST(last_modified AS INTEGER) DESC LIMIT 3000 OFFSET 60
     )",
-    )
-    .run()
-    .await
-    .unwrap();
+        )
+        .run()
+        .await
+        .unwrap();
+
+    let repo = BbsRepository::new(&dbo);
+    let threads = repo
+        .get_threads(1, repositories::bbs_repository::ThreadStatus::Unarchived)
+        .await
+        .unwrap();
+
+    let targets = threads
+        .iter()
+        .filter(|x| x.response_count >= 100)
+        .collect::<Vec<_>>();
+
+    console_debug!("targets.len(): {}", targets.len());
+
+    for th in targets {
+        let (responses, thread) = tokio::join!(
+            repo.get_responses(1, &th.thread_number, th.modulo as usize),
+            repo.get_thread(1, &th.thread_number),
+        );
+        let thread = thread.unwrap().unwrap();
+        let responses = responses.unwrap();
+        console_log!("thread_number: {}", th.thread_number);
+        console_log!("thread.response_count: {}", thread.response_count);
+        console_log!("responses.len(): {}", responses.len());
+        if thread.response_count != responses.len() as u32 {
+            dbo.threads_db
+                .prepare("UPDATE threads SET response_count = ? WHERE thread_number = ?")
+                .bind(&[responses.len().into(), th.thread_number.clone().into()])
+                .unwrap()
+                .run()
+                .await
+                .unwrap();
+        }
+    }
 }

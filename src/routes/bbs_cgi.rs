@@ -121,7 +121,7 @@ fn extract_forms(bytes: Vec<u8>) -> Option<BbsCgiForm> {
     };
 
     let subject = if is_thread {
-        Some(sanitize(&result["subject"]).clone())
+        Some(sanitize_thread_name(&result["subject"]).clone())
     } else {
         None
     };
@@ -200,6 +200,7 @@ struct BbsCgiRouter<'a> {
     asn: u32,
     default_name: String,
     local_debugging: bool,
+    using_hard_min_recent_res_span_cap: bool,
 }
 
 impl<'a> BbsCgiRouter<'a> {
@@ -226,6 +227,12 @@ impl<'a> BbsCgiRouter<'a> {
                     ));
                 }
             };
+
+        let using_hard_min_recent_res_span_cap = env
+            .var("HARD_MIN_RECENT_RES_SPAN_CAP")
+            .ok()
+            .map(|x| x.to_string() == "true")
+            .unwrap_or(false);
 
         let Ok(req_bytes) = req.bytes().await else {
             return Err(Response::error("Bad request - read bytes", 400));
@@ -272,6 +279,7 @@ impl<'a> BbsCgiRouter<'a> {
             host_url,
             local_debugging,
             asn: if local_debugging { 0 } else { req.cf().asn() },
+            using_hard_min_recent_res_span_cap,
         })
     }
 
@@ -303,6 +311,15 @@ impl<'a> BbsCgiRouter<'a> {
         };
 
         let (token_cookie_candidate, is_cap) = match (self.token_cookie, self.form.cap.as_deref()) {
+            (_, Some(cap))
+                if self
+                    .ua
+                    .as_ref()
+                    .map(|x| x.contains("BathyScaphe"))
+                    .unwrap_or(false) =>
+            {
+                (Some(cap), true)
+            }
             (Some(cookie), _) => (Some(cookie), false),
             (None, Some(cap)) => (Some(cap), true),
             (None, None) => (None, false),
@@ -424,17 +441,21 @@ impl<'a> BbsCgiRouter<'a> {
                 WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
             );
         }
-        let min_recent_res_span = match self
-            .get_min_recent_res_span(&authenticated_user_cookie.cookie)
-            .await
-        {
-            Ok(min_recent_res_span) => min_recent_res_span,
-            Err(e) => return Response::error(e, 500),
-        };
-        if min_recent_res_span < 5 {
-            return response_shift_jis_text_html(
-                WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "5秒以内の連続投稿はできません"),
-            );
+
+        if self.using_hard_min_recent_res_span_cap {
+            let min_recent_res_span = match self
+                .get_min_recent_res_span(&authenticated_user_cookie.cookie)
+                .await
+            {
+                Ok(min_recent_res_span) => min_recent_res_span,
+                Err(e) => return Response::error(e, 500),
+            };
+            if min_recent_res_span < 5 {
+                return response_shift_jis_text_html(
+                    WRITING_FAILED_HTML_RESPONSE
+                        .replace("{reason}", "5秒以内の連続投稿はできません"),
+                );
+            }
         }
 
         if let Some(s) = &authenticated_user_cookie.last_thread_creation {
@@ -465,11 +486,19 @@ impl<'a> BbsCgiRouter<'a> {
 
         if let Some(tinker) = tinker.as_mut() {
             tinker.wrote_count += 1;
+
+            if self.unix_time - tinker.last_wrote_at <= 5 {
+                return response_shift_jis_text_html(
+                    WRITING_FAILED_HTML_RESPONSE
+                        .replace("{reason}", "5秒以内の連続投稿はできません"),
+                );
+            }
+
             tinker.last_wrote_at = self.unix_time;
             if self.form.is_thread {
                 tinker.created_thread_count += 1;
             }
-            if tinker.last_level_up_at + 60 * 60 * 23 < self.unix_time {
+            if tinker.last_level_up_at + 60 * 60 * 23 < self.unix_time && tinker.level < 20 {
                 tinker.level += 1;
                 tinker.last_level_up_at = self.unix_time;
             }
@@ -677,7 +706,11 @@ impl<'a> BbsCgiRouter<'a> {
             thread_id: thread_id.as_ref().unwrap(),
         };
 
-        match self.repo.create_response(res).await {
+        match self
+            .repo
+            .create_response(res, thread_info.modulo as usize)
+            .await
+        {
             Ok(_) => response_shift_jis_text_html(WRITING_SUCCESS_HTML_RESPONSE.to_string()),
             Err(e) => Response::error(format!("internal server error - {e}"), 500),
         }
@@ -700,7 +733,33 @@ impl<'a> BbsCgiRouter<'a> {
                 name.push_str(&format!(" </b>(L{})<b>", tinker.level));
                 name
             }
-            (Some(tinker), MetadentType::VVerbose | MetadentType::VVVerbose) => {
+            (Some(_), MetadentType::VVerbose) => {
+                let mut name = if name.is_empty() {
+                    self.default_name.clone()
+                } else {
+                    name.to_string()
+                };
+                let metadent = generate_meta_ident(
+                    self.asn,
+                    &self.ip_addr,
+                    self.ua.as_ref().unwrap_or(&"Unknown".to_string()),
+                    generate_date_seed(),
+                );
+                name.push_str(&format!(
+                    " </b>({})<b>",
+                    if let Some(id) = &self.id {
+                        if id == CAP_ID_NONE {
+                            "????-????"
+                        } else {
+                            &metadent
+                        }
+                    } else {
+                        &metadent
+                    }
+                ));
+                name
+            }
+            (Some(tinker), MetadentType::VVVerbose) => {
                 let mut name = if name.is_empty() {
                     self.default_name.clone()
                 } else {
@@ -739,6 +798,88 @@ fn sanitize(input: &str) -> String {
         .replace('\n', "<br>")
         .replace('\r', "")
         .replace("&#10;", "")
+}
+
+fn sanitize_thread_name(input: &str) -> String {
+    let sanitized = sanitize(input);
+    // Delete all of semicolon closing \n character references
+    let re = Regex::new(r"&#([Xx]0*[aA]|0*10);").unwrap();
+    let rn_sanitized = re.replace_all(&sanitized, "");
+
+    sanitize_non_semi_closing_num_char_refs(&rn_sanitized)
+}
+
+// Delete all of non-semicolon closing numeric character references
+fn sanitize_non_semi_closing_num_char_refs(target: &str) -> String {
+    let mut sanitized = Vec::new();
+    let mut ampersand_used = -1;
+    let mut total_removed_len = 0;
+    enum NumRefKind {
+        Undef, // this state is only cause after reading "&#"
+        Hex,
+        Dec,
+    }
+    let mut in_num_ref = None;
+    for (i, c) in target.chars().enumerate() {
+        if let Some(kind) = &in_num_ref {
+            if c == ';' {
+                in_num_ref = None;
+                sanitized.push(c);
+            } else {
+                match kind {
+                    NumRefKind::Undef => {
+                        match c {
+                            'x' | 'X' => in_num_ref = Some(NumRefKind::Hex),
+                            '0'..='9' => in_num_ref = Some(NumRefKind::Dec),
+                            _ => in_num_ref = None,
+                        };
+                        sanitized.push(c);
+                    }
+                    NumRefKind::Hex => match c {
+                        '0'..='9' | 'a'..='f' | 'A'..='F' => sanitized.push(c),
+                        _ => {
+                            // invalid non-semicolon closing numeric character references
+                            in_num_ref = None;
+                            sanitized =
+                                sanitized[0..ampersand_used as usize - total_removed_len].to_vec();
+                            total_removed_len += i - ampersand_used as usize;
+                            sanitized.push(c);
+                            if c == '&' {
+                                ampersand_used = i as isize;
+                            }
+                        }
+                    },
+                    NumRefKind::Dec => match c {
+                        '0'..='9' => sanitized.push(c),
+                        _ => {
+                            // invalid non-semicolon closing numeric character references
+                            in_num_ref = None;
+                            sanitized =
+                                sanitized[0..ampersand_used as usize - total_removed_len].to_vec();
+                            total_removed_len += i - ampersand_used as usize;
+                            sanitized.push(c);
+                            if c == '&' {
+                                ampersand_used = i as isize;
+                            }
+                        }
+                    },
+                }
+            }
+        } else {
+            sanitized.push(c);
+            if c == '&' {
+                ampersand_used = i as isize;
+            } else if ampersand_used == (i as isize - 1) && c == '#' {
+                in_num_ref = Some(NumRefKind::Undef);
+            }
+        }
+    }
+
+    if in_num_ref.is_some() {
+        sanitized = sanitized[0..ampersand_used as usize - total_removed_len].to_vec();
+    }
+
+    sanitized.into_iter().collect::<String>()
 }
 
 // &str is utf-8 bytes
@@ -940,6 +1081,57 @@ mod tests {
         for c in cands.iter() {
             let result = generate_meta_ident(c.0, c.1, c.2, seed);
             println!("{result}");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_non_semi_closing_num_char_refs() {
+        let test_cases = [
+            // Test case 1
+            (
+                "This is a text with &#32; spaces.",
+                "This is a text with &#32; spaces.",
+            ),
+            // Test case 2
+            (
+                "&#32;Hello, &#xa;world!&#65;",
+                "&#32;Hello, &#xa;world!&#65;",
+            ),
+            // Test case 3
+            (
+                "This is an invalid numeric reference: &#32.",
+                "This is an invalid numeric reference: .",
+            ),
+            // Test case 4
+            (
+                "Invalid numeric references: &#32&#65&#xa.",
+                "Invalid numeric references: .",
+            ),
+            // Test case 5
+            (
+                "Mix of valid and invalid: &#32&#65;&#xa&#98aてすと&#99;.",
+                "Mix of valid and invalid: &#65;aてすと&#99;.",
+            ),
+            // Test case 6
+            (
+                "Mix of valid and invalid: &#32Hello, &#xa;&#65;world!",
+                "Mix of valid and invalid: Hello, &#xa;&#65;world!",
+            ),
+            // Test case 7
+            ("", ""),
+            // Test case 8
+            (
+                "No numeric references here. だよね",
+                "No numeric references here. だよね",
+            ),
+            // Test case 9
+            ("&#32&#xa", ""),
+            // Test case 10
+            ("&#32;&#xa;", "&#32;&#xa;"),
+        ];
+
+        for (input, expected) in test_cases.iter() {
+            assert_eq!(*expected, sanitize_non_semi_closing_num_char_refs(input));
         }
     }
 }
