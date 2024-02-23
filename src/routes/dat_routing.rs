@@ -42,7 +42,7 @@ pub async fn route_dat(
                 ))
                 .unwrap()
             };
-            return Response::redirect(generate_url(thread_info.thread_id));
+            Response::redirect(generate_url(thread_info.thread_id))
         } else {
             Response::error("Not found - dat", 404)
         };
@@ -87,7 +87,7 @@ pub async fn route_dat(
     let sjis_body = encoding_rs::SHIFT_JIS.encode(&body).0.into_owned();
 
     let ranged_sjis_body = match (range, ua) {
-        (Some(range), Some(ua)) if !ua.contains("Mate") && !ua.contains("Xeno") => {
+        (Some(range), Some(ua)) if !ua.contains("Xeno") => {
             if let Some(range) = range.split('=').nth(1) {
                 let range = range.split('-').collect::<Vec<_>>();
                 let Some(start) = range.first().and_then(|x| x.parse::<usize>().ok()) else {

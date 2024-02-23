@@ -40,7 +40,7 @@ VALUES
 <b>以下がローカルルールです<br><br>
 
 <a href="/">全体の利用規約</a>などはこちらに<br>
-<a href="https://git.3chan.cc/edginer/eddiner/issues">運営・開発への要望・相談・報告はこちらへ</a>
+<a href="https://github.com/edginer/eddiner/discussions/">運営への相談・報告はこちらへ</a>
 <br>',
         'liveedge'
     );

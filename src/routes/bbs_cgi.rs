@@ -320,6 +320,16 @@ impl<'a> BbsCgiRouter<'a> {
             {
                 (Some(cap), true)
             }
+            (None, _)
+                // For Cookie supporting browsers
+                if self
+                    .ua
+                    .as_ref()
+                    .map(|x| x.contains("2chMate"))
+                    .unwrap_or(false) =>
+            {
+                (None, false)
+            }
             (Some(cookie), _) => (Some(cookie), false),
             (None, Some(cap)) => (Some(cap), true),
             (None, None) => (None, false),
@@ -602,17 +612,17 @@ impl<'a> BbsCgiRouter<'a> {
 
         let (body_opt, mt) = if body.contains("!metadent:vvv:") {
             (
-                Some(body.replace("!metadent:vvv:", "!metadent:vvv - configured")),
+                Some(body.replacen("!metadent:vvv:", "!metadent:vvv - configured", 1)),
                 MetadentType::VVVerbose,
             )
         } else if body.contains("!metadent:vv:") {
             (
-                Some(body.replace("!metadent:vv:", "!metadent:vv - configured")),
+                Some(body.replacen("!metadent:vv:", "!metadent:vv - configured", 1)),
                 MetadentType::VVerbose,
             )
         } else if body.contains("!metadent:v:") {
             (
-                Some(body.replace("!metadent:v:", "!metadent:v - configured")),
+                Some(body.replacen("!metadent:v:", "!metadent:v - configured", 1)),
                 MetadentType::Verbose,
             )
         } else {
