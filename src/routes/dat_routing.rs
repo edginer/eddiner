@@ -51,7 +51,7 @@ pub async fn route_dat(
         if let Ok(parsed_date_time) =
             chrono::NaiveDateTime::parse_from_str(&if_modified_since, "%Y/%m/%d %H:%M:%S")
         {
-            let remote_last_modified = parsed_date_time.timestamp() - 32400; // fix local time
+            let remote_last_modified = parsed_date_time.and_utc().timestamp() - 32400; // fix local time
 
             if remote_last_modified >= thread.last_modified.parse::<i64>().unwrap() {
                 return Response::empty().map(|mut r| {

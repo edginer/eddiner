@@ -11,6 +11,10 @@
       margin-right: auto;
       width: auto;
     }
+
+    p {
+      margin-bottom: 0px;
+    }
   </style>
   <title>{{ thread.title }}</title>
 </head>
@@ -40,17 +44,19 @@
   <main class="container">
     <section id="res-list">
       <ol>
-        {%- for res in responses -%}
+        {%- for res in res_l -%}
         <li>
-          {% if res.name is not none and res.name|length > 1 -%}
-          {{ res.name | remove_token }}
+          {% if res.res.name is not none and res.res.name|length > 1 -%}
+          {{ res.res.name | remove_token }}
           {%- else -%}
           {{ default_name }}
           {%- endif -%}
-          <small> {{ res.date }} ID:{{ res.author_id if res.author_id is not none }}</small>
+          <small> {{ res.res.date }} ID:{{ res.res.author_id if res.res.author_id is not none }}</small>
+          {%- for line in res.lines -%}
+          <p>{{ line }}</p>
+          {%- endfor -%}
         </li>
-        <p>{{ res.body }}</p>
-        {% endfor %}
+        {%- endfor -%}
       </ol>
     </section>
     <section id="terms-of-use">
@@ -73,7 +79,7 @@
         <input type="hidden" name="submit" value="書き込む">
         <input type="hidden" name="bbs" value="{{ board.board_key }}">
         <input type="hidden" name="key" value="{{ thread.thread_number }}">
-        <input type="text" name="MESSAGE" placeholder="本文" aria-label="Body" required />
+        <textarea type="text" name="MESSAGE" placeholder="本文" aria-label="Body" required></textarea>
         <div class="grid">
           <label for="terms">
             <input type="checkbox" role="switch" id="terms" name="terms" required />

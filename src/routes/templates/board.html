@@ -60,7 +60,7 @@
         </div>
         <input type="hidden" name="submit" value="新規スレッド作成">
         <input type="hidden" name="bbs" value="{{ board.board_key }}">
-        <input type="text" name="MESSAGE" placeholder="本文" aria-label="Body" required />
+        <textarea name="MESSAGE" placeholder="本文" aria-label="Body" required></textarea>
         <div class="grid">
           <label for="terms">
             <input type="checkbox" role="switch" id="terms" name="terms" required />

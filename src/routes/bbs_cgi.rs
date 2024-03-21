@@ -278,7 +278,11 @@ impl<'a> BbsCgiRouter<'a> {
             ua,
             host_url,
             local_debugging,
-            asn: if local_debugging { 0 } else { req.cf().asn() },
+            asn: if local_debugging {
+                0
+            } else {
+                req.cf().map(|x| x.asn()).unwrap_or_else(|| 0)
+            },
             using_hard_min_recent_res_span_cap,
         })
     }

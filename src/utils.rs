@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::NaiveDateTime;
+use chrono::DateTime;
 use rand::Rng;
 use worker::{Date, Error, Request, Response};
 
@@ -125,8 +125,11 @@ pub fn response_shift_jis_text_html(body: String) -> worker::Result<Response> {
 }
 
 pub fn get_current_date_time() -> chrono::NaiveDateTime {
-    let date = NaiveDateTime::from_timestamp_millis(Date::now().as_millis() as i64).unwrap();
-    date.checked_add_signed(chrono::Duration::hours(9)).unwrap()
+    let date = DateTime::from_timestamp_millis(Date::now().as_millis() as i64)
+        .unwrap()
+        .naive_utc();
+    date.checked_add_signed(chrono::Duration::try_hours(9).unwrap())
+        .unwrap()
 }
 
 pub fn get_current_date_time_string(is_ja: bool) -> String {
