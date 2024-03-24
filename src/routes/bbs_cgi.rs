@@ -278,7 +278,11 @@ impl<'a> BbsCgiRouter<'a> {
             ua,
             host_url,
             local_debugging,
-            asn: if local_debugging { 0 } else { req.cf().asn() },
+            asn: if local_debugging {
+                0
+            } else {
+                req.cf().map(|x| x.asn()).unwrap_or_else(|| 0)
+            },
             using_hard_min_recent_res_span_cap,
         })
     }
@@ -319,6 +323,16 @@ impl<'a> BbsCgiRouter<'a> {
                     .unwrap_or(false) =>
             {
                 (Some(cap), true)
+            }
+            (None, _)
+                // For Cookie supporting browsers
+                if self
+                    .ua
+                    .as_ref()
+                    .map(|x| x.contains("2chMate"))
+                    .unwrap_or(false) =>
+            {
+                (None, false)
             }
             (Some(cookie), _) => (Some(cookie), false),
             (None, Some(cap)) => (Some(cap), true),
@@ -602,17 +616,17 @@ impl<'a> BbsCgiRouter<'a> {
 
         let (body_opt, mt) = if body.contains("!metadent:vvv:") {
             (
-                Some(body.replace("!metadent:vvv:", "!metadent:vvv - configured")),
+                Some(body.replacen("!metadent:vvv:", "!metadent:vvv - configured", 1)),
                 MetadentType::VVVerbose,
             )
         } else if body.contains("!metadent:vv:") {
             (
-                Some(body.replace("!metadent:vv:", "!metadent:vv - configured")),
+                Some(body.replacen("!metadent:vv:", "!metadent:vv - configured", 1)),
                 MetadentType::VVerbose,
             )
         } else if body.contains("!metadent:v:") {
             (
-                Some(body.replace("!metadent:v:", "!metadent:v - configured")),
+                Some(body.replacen("!metadent:v:", "!metadent:v - configured", 1)),
                 MetadentType::Verbose,
             )
         } else {

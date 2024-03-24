@@ -1,8 +1,10 @@
 use crate::repositories::bbs_repository::ThreadStatus;
+use crate::response::Res;
 use crate::utils::into_workers_err;
 use crate::{board_config::BoardConfig, repositories::bbs_repository::BbsRepository};
 
 use minijinja::{context, Environment};
+use serde::Serialize;
 use worker::{Response, Result};
 
 use super::bbs_cgi::TokenRemover;
@@ -86,6 +88,21 @@ pub(crate) async fn route_thread(
         Ok(responses) => responses,
         Err(e) => return Response::error(format!("DB error {}", e), 500),
     };
+    let res_l = responses
+        .iter()
+        .map(|res| {
+            let lines = res
+                .body
+                .replace("<br>", "\n")
+                .lines()
+                .map(|x| x.to_string())
+                .collect();
+            ResByLines {
+                res: res.clone(),
+                lines,
+            }
+        })
+        .collect::<Vec<_>>();
 
     let token_remover = TokenRemover::new();
 
@@ -95,10 +112,16 @@ pub(crate) async fn route_thread(
     env.add_filter("remove_token", move |name| token_remover.remove(name));
     let tmpl = env.get_template("thread.html").map_err(into_workers_err)?;
     let html = tmpl
-        .render(context!(board, thread, responses))
+        .render(context!(board, thread, res_l))
         .map_err(into_workers_err)?;
     Response::from_html(html).map(|mut x| {
         let _ = x.headers_mut().append("Cache-Control", "s-maxage=15");
         x
     })
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ResByLines {
+    res: Res,
+    lines: Vec<String>,
 }
