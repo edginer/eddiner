@@ -473,10 +473,29 @@ impl<'a> BbsCgiRouter<'a> {
         }
 
         if let Some(s) = &authenticated_user_cookie.last_thread_creation {
-            if self.form.is_thread && self.unix_time - s.parse::<u64>().unwrap() < 120 {
-                return response_shift_jis_text_html(
-                    WRITING_FAILED_HTML_RESPONSE.replace("{reason}", "ちょっとスレ立てすぎ！"),
-                );
+            // Level starts from 0 (Level 0 only appears in the first response)
+            let level_map = [60 * 60, 60 * 30, 60 * 15, 60 * 8, 60 * 4, 60 * 2];
+            let span_limit = if let Some(tinker) = &tinker {
+                level_map[if tinker.level > 5 { 5 } else { tinker.level } as usize]
+            } else {
+                120
+            };
+
+            if self.form.is_thread && self.unix_time - s.parse::<u64>().unwrap() < span_limit {
+                return response_shift_jis_text_html(WRITING_FAILED_HTML_RESPONSE.replace(
+                    "{reason}",
+                    &format!(
+                        "ちょっとスレ立てすぎ！ {}",
+                        if let Some(tinker) = &tinker {
+                            format!(
+                                "(L{}は{}秒に一回スレを立てることができます)",
+                                tinker.level, span_limit
+                            )
+                        } else {
+                            "".to_string()
+                        },
+                    ),
+                ));
             }
         }
 
