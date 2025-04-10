@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> This repository is currently unmaintained due to lack of development resources.
+> We are currently developing [eddist](https://github.com/edginer/eddist/) as a successor.
+
 # Re-eddi (eddi-chan)
 なんEとほぼ同等の技術スタックを用いてCloudflare workers上に5ch型掲示板を作ろうのレポジトリです
 
